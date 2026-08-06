@@ -1,0 +1,2 @@
+CREATE DATABASE app_a;
+CREATE DATABASE app_b;

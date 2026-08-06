@@ -1,0 +1,30 @@
+{
+  "name": "seleksi-2-labpro-2026",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter './auth-provider/**' --filter './applications/**' dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "lint:fix": "pnpm -r --if-present lint:fix",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r test",
+    "format": "prettier --write .",
+    "compose:up": "docker compose up --build",
+    "compose:down": "docker compose down",
+    "compose:reset": "docker compose down -v"
+  },
+  "devDependencies": {
+    "prettier": "^3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "esbuild",
+      "prisma",
+      "sharp",
+      "unrs-resolver"
+    ]
+  }
+}

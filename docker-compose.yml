@@ -1,0 +1,188 @@
+services:
+  primary-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${PRIMARY_DB_USER}
+      POSTGRES_PASSWORD: ${PRIMARY_DB_PASSWORD}
+      POSTGRES_DB: ${PRIMARY_DB_NAME}
+    ports:
+      - '${PRIMARY_DB_PORT}:5432'
+    volumes:
+      - primary-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${PRIMARY_DB_USER} -d ${PRIMARY_DB_NAME}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  local-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${LOCAL_DB_USER}
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD}
+      POSTGRES_DB: postgres
+    ports:
+      - '${LOCAL_DB_PORT}:5432'
+    volumes:
+      - local-db-data:/var/lib/postgresql/data
+      - ./infrastructure/postgres-local/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${LOCAL_DB_USER} -d postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - '${RABBITMQ_AMQP_PORT}:5672'
+      - '${RABBITMQ_MANAGEMENT_PORT}:15672'
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD-SHELL', 'rabbitmq-diagnostics -q ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  primary-db-migrate:
+    build:
+      context: .
+      dockerfile: auth-provider/server/Dockerfile
+    command: ['pnpm', '--filter', 'server', 'exec', 'prisma', 'migrate', 'deploy']
+    environment:
+      DATABASE_URL: postgresql://${PRIMARY_DB_USER}:${PRIMARY_DB_PASSWORD}@primary-db:5432/${PRIMARY_DB_NAME}
+    depends_on:
+      primary-db:
+        condition: service_healthy
+    restart: 'no'
+
+  primary-db-seed:
+    build:
+      context: .
+      dockerfile: auth-provider/server/Dockerfile
+    command: ['pnpm', '--filter', 'server', 'exec', 'prisma', 'db', 'seed']
+    environment:
+      DATABASE_URL: postgresql://${PRIMARY_DB_USER}:${PRIMARY_DB_PASSWORD}@primary-db:5432/${PRIMARY_DB_NAME}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+    depends_on:
+      primary-db-migrate:
+        condition: service_completed_successfully
+    restart: 'no'
+
+  auth-server:
+    build:
+      context: .
+      dockerfile: auth-provider/server/Dockerfile
+    ports:
+      - '${AUTH_SERVER_PORT}:3001'
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgresql://${PRIMARY_DB_USER}:${PRIMARY_DB_PASSWORD}@primary-db:5432/${PRIMARY_DB_NAME}
+      SSO_COOKIE_SECRET: ${SSO_COOKIE_SECRET}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
+    depends_on:
+      primary-db-seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health >/dev/null || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  sync-worker:
+    build:
+      context: .
+      dockerfile: auth-provider/sync-worker/Dockerfile
+    ports:
+      - '${SYNC_WORKER_PORT}:3004'
+    environment:
+      PORT: 3004
+      DATABASE_URL: postgresql://${PRIMARY_DB_USER}:${PRIMARY_DB_PASSWORD}@primary-db:5432/${PRIMARY_DB_NAME}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      primary-db-seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3004/health >/dev/null || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  control-panel:
+    build:
+      context: .
+      dockerfile: auth-provider/control-panel/Dockerfile
+    ports:
+      - '${CONTROL_PANEL_PORT}:3000'
+    environment:
+      PORT: 3000
+      AUTH_SERVER_INTERNAL_URL: http://auth-server:3001
+    depends_on:
+      auth-server:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/api/health >/dev/null || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  app-a:
+    build:
+      context: .
+      dockerfile: applications/app-a/Dockerfile
+    ports:
+      - '${APP_A_PORT}:3002'
+    environment:
+      PORT: 3002
+      DATABASE_URL: postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@local-db:5432/app_a
+      AUTH_SERVER_INTERNAL_URL: http://auth-server:3001
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
+    depends_on:
+      auth-server:
+        condition: service_healthy
+      local-db:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/api/health >/dev/null || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  app-b:
+    build:
+      context: .
+      dockerfile: applications/app-b/Dockerfile
+    ports:
+      - '${APP_B_PORT}:3003'
+    environment:
+      PORT: 3003
+      DATABASE_URL: postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@local-db:5432/app_b
+      AUTH_SERVER_INTERNAL_URL: http://auth-server:3001
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
+    depends_on:
+      auth-server:
+        condition: service_healthy
+      local-db:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3003/api/health >/dev/null || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  primary-db-data:
+  local-db-data:
+  rabbitmq-data:

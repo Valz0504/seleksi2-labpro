@@ -1,0 +1,17 @@
+node_modules/
+.pnpm-store/
+
+.env*
+!.env.example
+
+.next/
+dist/
+coverage/
+
+*.log
+.DS_Store
+
+**/.agents/
+**/.claude/
+**/.windsurf/
+**/skills-lock.json
