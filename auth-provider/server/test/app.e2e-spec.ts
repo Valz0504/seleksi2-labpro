@@ -7,7 +7,7 @@ import { AppModule } from './../src/app.module';
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -16,14 +16,27 @@ describe('AppController (e2e)', () => {
     await app.init();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
+  it('GET / identifies the auth server', () => {
+    return request(app.getHttpServer()).get('/').expect(200).expect({
+      service: 'auth-server',
+      message: 'Auth Provider Server is running',
+    });
   });
 
-  afterEach(async () => {
+  it('GET /health reports a healthy status', () => {
+    return request(app.getHttpServer())
+      .get('/health')
+      .expect(200)
+      .expect(({ body }: { body: Record<string, unknown> }) => {
+        expect(body).toMatchObject({
+          status: 'ok',
+          service: 'auth-server',
+        });
+        expect(body.timestamp).toEqual(expect.any(String));
+      });
+  });
+
+  afterAll(async () => {
     await app.close();
   });
 });
