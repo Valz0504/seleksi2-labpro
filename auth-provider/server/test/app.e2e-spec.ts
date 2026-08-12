@@ -8,6 +8,10 @@ import { hashPassword } from './../src/common/security/password';
 import { PrismaService } from './../src/database/prisma.service';
 
 describe('AppController (e2e)', () => {
+  const applicationId = '33333333-3333-4333-8333-333333333333';
+  const applicationRedirectUri = 'http://localhost:3002/auth/callback';
+  const validState = 'random-state-with-enough-entropy';
+  const validCodeChallenge = 'A'.repeat(43);
   let app: INestApplication<App>;
   let agent: ReturnType<typeof request.agent>;
   let persistedSession:
@@ -40,6 +44,18 @@ describe('AppController (e2e)', () => {
     },
     accessToken: {
       updateMany: jest.fn(),
+    },
+    application: {
+      findUnique: jest.fn(),
+    },
+    applicationGroupPolicy: {
+      findFirst: jest.fn(),
+    },
+    authorizationCode: {
+      create: jest.fn(),
+    },
+    auditLog: {
+      create: jest.fn(),
     },
     $transaction: jest.fn(),
   };
@@ -92,6 +108,35 @@ describe('AppController (e2e)', () => {
       },
     );
     prisma.accessToken.updateMany.mockResolvedValue({ count: 0 });
+    prisma.application.findUnique.mockImplementation(
+      ({
+        where,
+        select,
+      }: {
+        where: { clientId: string };
+        select: {
+          redirectUris: { where: { redirectUri: string } };
+        };
+      }) =>
+        Promise.resolve(
+          where.clientId === 'app-a'
+            ? {
+                id: applicationId,
+                status: 'ACTIVE',
+                redirectUris:
+                  select.redirectUris.where.redirectUri ===
+                  applicationRedirectUri
+                    ? [{ id: '44444444-4444-4444-8444-444444444444' }]
+                    : [],
+              }
+            : null,
+        ),
+    );
+    prisma.applicationGroupPolicy.findFirst.mockResolvedValue({
+      id: '55555555-5555-4555-8555-555555555555',
+    });
+    prisma.authorizationCode.create.mockResolvedValue({});
+    prisma.auditLog.create.mockResolvedValue({});
     prisma.$transaction.mockResolvedValue([]);
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -147,6 +192,44 @@ describe('AppController (e2e)', () => {
       .expect(400);
   });
 
+  it('does not redirect an authorization request to an unregistered URI', () => {
+    return request(app.getHttpServer())
+      .get('/authorize')
+      .query({
+        client_id: 'app-a',
+        redirect_uri: `${applicationRedirectUri}.attacker.example`,
+        response_type: 'code',
+        state: validState,
+        code_challenge: validCodeChallenge,
+        code_challenge_method: 'S256',
+      })
+      .expect(400)
+      .expect(({ headers }: { headers: Record<string, unknown> }) => {
+        expect(headers['location']).toBeUndefined();
+      });
+  });
+
+  it('returns login_required to a registered URI without a central session', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/authorize')
+      .query({
+        client_id: 'app-a',
+        redirect_uri: applicationRedirectUri,
+        response_type: 'code',
+        state: validState,
+        code_challenge: validCodeChallenge,
+        code_challenge_method: 'S256',
+      })
+      .expect(302);
+    const callbackUrl = new URL(response.headers['location']);
+
+    expect(callbackUrl.origin + callbackUrl.pathname).toBe(
+      applicationRedirectUri,
+    );
+    expect(callbackUrl.searchParams.get('error')).toBe('login_required');
+    expect(callbackUrl.searchParams.get('state')).toBe(validState);
+  });
+
   it('creates, reads, and revokes a signed central-session cookie', async () => {
     const loginResponse = await agent
       .post('/auth/login')
@@ -185,6 +268,33 @@ describe('AppController (e2e)', () => {
           },
         });
       });
+
+    const authorizationResponse = await agent
+      .get('/authorize')
+      .query({
+        client_id: 'app-a',
+        redirect_uri: applicationRedirectUri,
+        response_type: 'code',
+        state: validState,
+        code_challenge: validCodeChallenge,
+        code_challenge_method: 'S256',
+      })
+      .expect(302);
+    const callbackUrl = new URL(authorizationResponse.headers['location']);
+    const rawAuthorizationCode = callbackUrl.searchParams.get('code');
+    const authorizationCodeCalls = prisma.authorizationCode.create.mock
+      .calls as unknown as Array<
+      [{ data: { codeHash: string; redirectUri: string } }]
+    >;
+    const persistedAuthorizationCode = authorizationCodeCalls[0]?.[0].data;
+
+    expect(rawAuthorizationCode).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(callbackUrl.searchParams.get('state')).toBe(validState);
+    expect(persistedAuthorizationCode?.codeHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(persistedAuthorizationCode?.codeHash).not.toBe(rawAuthorizationCode);
+    expect(persistedAuthorizationCode?.redirectUri).toBe(
+      applicationRedirectUri,
+    );
 
     await agent.post('/auth/logout').expect(204);
     expect(prisma.accessToken.updateMany).toHaveBeenCalled();

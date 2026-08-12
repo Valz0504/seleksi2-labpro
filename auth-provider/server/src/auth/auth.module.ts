@@ -6,6 +6,6 @@ import { SessionCookieService } from './session-cookie.service';
 @Module({
   controllers: [AuthController],
   providers: [AuthService, SessionCookieService],
-  exports: [AuthService],
+  exports: [AuthService, SessionCookieService],
 })
 export class AuthModule {}

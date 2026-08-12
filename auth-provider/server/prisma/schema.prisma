@@ -49,18 +49,20 @@ enum PkceCodeChallengeMethod {
 }
 
 model User {
-  id           String              @id @default(uuid()) @db.Uuid
-  name         String
-  email        String              @unique
-  passwordHash String              @map("password_hash")
-  status       UserStatus          @default(ACTIVE)
-  role         UserRole            @default(USER)
-  createdAt    DateTime            @default(now()) @map("created_at")
-  updatedAt    DateTime            @updatedAt @map("updated_at")
-  userGroups   UserGroup[]
-  ssoSessions  SsoSession[]
-  authCodes    AuthorizationCode[]
-  accessTokens AccessToken[]
+  id                String              @id @default(uuid()) @db.Uuid
+  name              String
+  email             String              @unique
+  passwordHash      String              @map("password_hash")
+  status            UserStatus          @default(ACTIVE)
+  role              UserRole            @default(USER)
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  userGroups        UserGroup[]
+  ssoSessions       SsoSession[]
+  authCodes         AuthorizationCode[]
+  accessTokens      AccessToken[]
+  auditLogsAsActor  AuditLog[]          @relation("AuditLogActor")
+  auditLogsAsTarget AuditLog[]          @relation("AuditLogTargetUser")
 
   @@map("users")
 }
@@ -104,6 +106,7 @@ model Application {
   groupPolicies         ApplicationGroupPolicy[]
   authCodes             AuthorizationCode[]
   accessTokens          AccessToken[]
+  auditLogs             AuditLog[]
 
   @@map("applications")
 }
@@ -148,6 +151,7 @@ model SsoSession {
   user             User                @relation(fields: [userId], references: [id])
   authCodes        AuthorizationCode[]
   accessTokens     AccessToken[]
+  auditLogs        AuditLog[]
 
   @@index([userId, status])
   @@index([expiresAt])
@@ -195,4 +199,27 @@ model AccessToken {
   @@index([ssoSessionId, status])
   @@index([expiresAt])
   @@map("access_tokens")
+}
+
+model AuditLog {
+  id            String       @id @default(uuid()) @db.Uuid
+  eventType     String       @map("event_type")
+  actorId       String?      @map("actor_id") @db.Uuid
+  userId        String?      @map("user_id") @db.Uuid
+  applicationId String?      @map("application_id") @db.Uuid
+  sessionId     String?      @map("session_id") @db.Uuid
+  result        String
+  metadata      Json?
+  ipAddress     String?      @map("ip_address") @db.VarChar(45)
+  createdAt     DateTime     @default(now()) @map("created_at")
+  actor         User?        @relation("AuditLogActor", fields: [actorId], references: [id])
+  user          User?        @relation("AuditLogTargetUser", fields: [userId], references: [id])
+  application   Application? @relation(fields: [applicationId], references: [id])
+  session       SsoSession?  @relation(fields: [sessionId], references: [id])
+
+  @@index([eventType, createdAt])
+  @@index([userId, createdAt])
+  @@index([applicationId, createdAt])
+  @@index([sessionId])
+  @@map("audit_logs")
 }
