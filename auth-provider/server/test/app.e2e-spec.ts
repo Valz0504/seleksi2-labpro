@@ -36,9 +36,16 @@ describe('AppController (e2e)', () => {
     | undefined;
   let persistedAccessToken:
     | {
+        id: string;
         tokenHash: string;
+        userId: string;
         applicationId: string;
         ssoSessionId: string;
+        scopes: string[];
+        status: 'ACTIVE' | 'EXPIRED' | 'REVOKED';
+        issuedAt: Date;
+        expiresAt: Date;
+        revokedAt: Date | null;
       }
     | undefined;
   let persistedSession:
@@ -70,6 +77,7 @@ describe('AppController (e2e)', () => {
       updateMany: jest.fn(),
     },
     accessToken: {
+      findUnique: jest.fn(),
       updateMany: jest.fn(),
       create: jest.fn(),
     },
@@ -137,7 +145,58 @@ describe('AppController (e2e)', () => {
         return Promise.resolve({ count: persistedSession ? 1 : 0 });
       },
     );
-    prisma.accessToken.updateMany.mockResolvedValue({ count: 0 });
+    prisma.accessToken.findUnique.mockImplementation(
+      ({ where }: { where: { tokenHash: string } }) =>
+        Promise.resolve(
+          persistedAccessToken?.tokenHash === where.tokenHash &&
+            persistedSession
+            ? {
+                ...persistedAccessToken,
+                user: {
+                  id: activeUser.id,
+                  name: activeUser.name,
+                  email: activeUser.email,
+                  status: activeUser.status,
+                  userGroups: [
+                    { group: { name: 'administrators' } },
+                    { group: { name: 'app-a-users' } },
+                  ],
+                },
+                application: {
+                  id: applicationId,
+                  clientId: 'app-a',
+                  status: 'ACTIVE',
+                },
+                ssoSession: {
+                  id: persistedSession.id,
+                  status: persistedSession.status,
+                  expiresAt: persistedSession.expiresAt,
+                  revokedAt: persistedSession.revokedAt,
+                },
+              }
+            : null,
+        ),
+    );
+    prisma.accessToken.updateMany.mockImplementation(
+      ({
+        data,
+      }: {
+        data: { status?: 'ACTIVE' | 'EXPIRED' | 'REVOKED'; revokedAt?: Date };
+      }) => {
+        if (!persistedAccessToken) {
+          return Promise.resolve({ count: 0 });
+        }
+
+        if (data.status) {
+          persistedAccessToken.status = data.status;
+        }
+        if (data.revokedAt) {
+          persistedAccessToken.revokedAt = data.revokedAt;
+        }
+
+        return Promise.resolve({ count: 1 });
+      },
+    );
     prisma.application.findUnique.mockImplementation(
       ({ where, select }: { where: { clientId: string }; select: object }) => {
         if (where.clientId !== 'app-a') {
@@ -221,12 +280,21 @@ describe('AppController (e2e)', () => {
       }: {
         data: {
           tokenHash: string;
+          userId: string;
           applicationId: string;
           ssoSessionId: string;
+          scopes: string[];
+          expiresAt: Date;
         };
       }) => {
-        persistedAccessToken = data;
-        return Promise.resolve(data);
+        persistedAccessToken = {
+          id: '77777777-7777-4777-8777-777777777777',
+          ...data,
+          status: 'ACTIVE',
+          issuedAt: new Date(),
+          revokedAt: null,
+        };
+        return Promise.resolve(persistedAccessToken);
       },
     );
     prisma.auditLog.create.mockResolvedValue({});
@@ -329,6 +397,13 @@ describe('AppController (e2e)', () => {
     );
     expect(callbackUrl.searchParams.get('error')).toBe('login_required');
     expect(callbackUrl.searchParams.get('state')).toBe(validState);
+  });
+
+  it('rejects /userinfo without a Bearer access token', () => {
+    return request(app.getHttpServer()).get('/userinfo').expect(401).expect({
+      error: 'invalid_token',
+      error_description: 'Access token tidak valid atau telah berakhir',
+    });
   });
 
   it('completes login, authorization, token exchange, replay denial, and logout', async () => {
@@ -434,6 +509,21 @@ describe('AppController (e2e)', () => {
     expect(persistedAccessToken?.tokenHash).not.toBe(rawAccessToken);
 
     await agent
+      .get('/userinfo')
+      .set('Authorization', `Bearer ${rawAccessToken}`)
+      .expect(200)
+      .expect({
+        sub: activeUser.id,
+        name: activeUser.name,
+        email: activeUser.email,
+        groups: ['administrators', 'app-a-users'],
+        aud: 'app-a',
+        client_id: 'app-a',
+        central_session_id: persistedSession?.id,
+        scope: 'profile',
+      });
+
+    await agent
       .post('/token')
       .set('Authorization', basicAuthorization)
       .type('form')
@@ -448,6 +538,10 @@ describe('AppController (e2e)', () => {
     expect(prisma.accessToken.updateMany).toHaveBeenCalled();
 
     await agent.get('/auth/session').expect(401);
+    await agent
+      .get('/userinfo')
+      .set('Authorization', `Bearer ${rawAccessToken}`)
+      .expect(401);
   });
 
   afterAll(async () => {
