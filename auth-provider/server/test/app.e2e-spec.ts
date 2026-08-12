@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -5,15 +6,41 @@ import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { configureApp } from './../src/app.setup';
 import { hashPassword } from './../src/common/security/password';
+import { hashSecret } from './../src/common/security/secret';
 import { PrismaService } from './../src/database/prisma.service';
 
 describe('AppController (e2e)', () => {
   const applicationId = '33333333-3333-4333-8333-333333333333';
   const applicationRedirectUri = 'http://localhost:3002/auth/callback';
+  const clientSecret = 'e2e-client-secret';
   const validState = 'random-state-with-enough-entropy';
-  const validCodeChallenge = 'A'.repeat(43);
+  const validCodeVerifier = 'v'.repeat(43);
+  const validCodeChallenge = createHash('sha256')
+    .update(validCodeVerifier, 'ascii')
+    .digest('base64url');
   let app: INestApplication<App>;
   let agent: ReturnType<typeof request.agent>;
+  let persistedAuthorizationCode:
+    | {
+        id: string;
+        codeHash: string;
+        userId: string;
+        applicationId: string;
+        ssoSessionId: string;
+        redirectUri: string;
+        codeChallenge: string;
+        codeChallengeMethod: 'S256';
+        expiresAt: Date;
+        usedAt: Date | null;
+      }
+    | undefined;
+  let persistedAccessToken:
+    | {
+        tokenHash: string;
+        applicationId: string;
+        ssoSessionId: string;
+      }
+    | undefined;
   let persistedSession:
     | {
         id: string;
@@ -44,6 +71,7 @@ describe('AppController (e2e)', () => {
     },
     accessToken: {
       updateMany: jest.fn(),
+      create: jest.fn(),
     },
     application: {
       findUnique: jest.fn(),
@@ -53,6 +81,8 @@ describe('AppController (e2e)', () => {
     },
     authorizationCode: {
       create: jest.fn(),
+      findUnique: jest.fn(),
+      updateMany: jest.fn(),
     },
     auditLog: {
       create: jest.fn(),
@@ -109,35 +139,106 @@ describe('AppController (e2e)', () => {
     );
     prisma.accessToken.updateMany.mockResolvedValue({ count: 0 });
     prisma.application.findUnique.mockImplementation(
-      ({
-        where,
-        select,
-      }: {
-        where: { clientId: string };
-        select: {
-          redirectUris: { where: { redirectUri: string } };
-        };
-      }) =>
-        Promise.resolve(
-          where.clientId === 'app-a'
-            ? {
-                id: applicationId,
-                status: 'ACTIVE',
-                redirectUris:
-                  select.redirectUris.where.redirectUri ===
-                  applicationRedirectUri
-                    ? [{ id: '44444444-4444-4444-8444-444444444444' }]
-                    : [],
-              }
-            : null,
-        ),
+      ({ where, select }: { where: { clientId: string }; select: object }) => {
+        if (where.clientId !== 'app-a') {
+          return Promise.resolve(null);
+        }
+
+        if ('redirectUris' in select) {
+          const redirectSelection = select['redirectUris'] as {
+            where: { redirectUri: string };
+          };
+
+          return Promise.resolve({
+            id: applicationId,
+            status: 'ACTIVE',
+            redirectUris:
+              redirectSelection.where.redirectUri === applicationRedirectUri
+                ? [{ id: '44444444-4444-4444-8444-444444444444' }]
+                : [],
+          });
+        }
+
+        return Promise.resolve({
+          id: applicationId,
+          status: 'ACTIVE',
+          clientSecretHash: hashSecret(clientSecret),
+        });
+      },
     );
     prisma.applicationGroupPolicy.findFirst.mockResolvedValue({
       id: '55555555-5555-4555-8555-555555555555',
     });
-    prisma.authorizationCode.create.mockResolvedValue({});
+    prisma.authorizationCode.create.mockImplementation(
+      ({
+        data,
+      }: {
+        data: Omit<
+          NonNullable<typeof persistedAuthorizationCode>,
+          'id' | 'usedAt'
+        >;
+      }) => {
+        persistedAuthorizationCode = {
+          id: '66666666-6666-4666-8666-666666666666',
+          ...data,
+          usedAt: null,
+        };
+
+        return Promise.resolve(persistedAuthorizationCode);
+      },
+    );
+    prisma.authorizationCode.findUnique.mockImplementation(
+      ({ where }: { where: { codeHash: string } }) =>
+        Promise.resolve(
+          persistedAuthorizationCode?.codeHash === where.codeHash &&
+            persistedSession
+            ? {
+                ...persistedAuthorizationCode,
+                user: { status: activeUser.status },
+                application: { status: 'ACTIVE' },
+                ssoSession: {
+                  status: persistedSession.status,
+                  expiresAt: persistedSession.expiresAt,
+                  revokedAt: persistedSession.revokedAt,
+                },
+              }
+            : null,
+        ),
+    );
+    prisma.authorizationCode.updateMany.mockImplementation(
+      ({ data }: { data: { usedAt: Date } }) => {
+        if (!persistedAuthorizationCode || persistedAuthorizationCode.usedAt) {
+          return Promise.resolve({ count: 0 });
+        }
+
+        persistedAuthorizationCode.usedAt = data.usedAt;
+        return Promise.resolve({ count: 1 });
+      },
+    );
+    prisma.accessToken.create.mockImplementation(
+      ({
+        data,
+      }: {
+        data: {
+          tokenHash: string;
+          applicationId: string;
+          ssoSessionId: string;
+        };
+      }) => {
+        persistedAccessToken = data;
+        return Promise.resolve(data);
+      },
+    );
     prisma.auditLog.create.mockResolvedValue({});
-    prisma.$transaction.mockResolvedValue([]);
+    prisma.$transaction.mockImplementation((input: unknown) => {
+      if (typeof input === 'function') {
+        return (input as (transaction: typeof prisma) => Promise<unknown>)(
+          prisma,
+        );
+      }
+
+      return Promise.all(input as Promise<unknown>[]);
+    });
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -230,7 +331,7 @@ describe('AppController (e2e)', () => {
     expect(callbackUrl.searchParams.get('state')).toBe(validState);
   });
 
-  it('creates, reads, and revokes a signed central-session cookie', async () => {
+  it('completes login, authorization, token exchange, replay denial, and logout', async () => {
     const loginResponse = await agent
       .post('/auth/login')
       .send({ email: activeUser.email, password: 'correct-password' })
@@ -282,11 +383,6 @@ describe('AppController (e2e)', () => {
       .expect(302);
     const callbackUrl = new URL(authorizationResponse.headers['location']);
     const rawAuthorizationCode = callbackUrl.searchParams.get('code');
-    const authorizationCodeCalls = prisma.authorizationCode.create.mock
-      .calls as unknown as Array<
-      [{ data: { codeHash: string; redirectUri: string } }]
-    >;
-    const persistedAuthorizationCode = authorizationCodeCalls[0]?.[0].data;
 
     expect(rawAuthorizationCode).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(callbackUrl.searchParams.get('state')).toBe(validState);
@@ -295,6 +391,58 @@ describe('AppController (e2e)', () => {
     expect(persistedAuthorizationCode?.redirectUri).toBe(
       applicationRedirectUri,
     );
+
+    const basicAuthorization = `Basic ${Buffer.from(
+      `app-a:${clientSecret}`,
+    ).toString('base64')}`;
+    const tokenRequestBody = {
+      grant_type: 'authorization_code',
+      code: rawAuthorizationCode,
+      redirect_uri: applicationRedirectUri,
+      code_verifier: validCodeVerifier,
+    };
+    const tokenResponse = await agent
+      .post('/token')
+      .set('Authorization', basicAuthorization)
+      .type('form')
+      .send(tokenRequestBody)
+      .expect(200);
+
+    expect(tokenResponse.headers['cache-control']).toBe('no-store');
+    expect(tokenResponse.headers['pragma']).toBe('no-cache');
+    const tokenResponseBody = tokenResponse.body as unknown;
+
+    expect(tokenResponseBody).toMatchObject({
+      token_type: 'Bearer',
+      expires_in: 900,
+      scope: 'profile',
+    });
+    if (
+      typeof tokenResponseBody !== 'object' ||
+      tokenResponseBody === null ||
+      !('access_token' in tokenResponseBody) ||
+      typeof tokenResponseBody.access_token !== 'string'
+    ) {
+      throw new Error('Token response did not include an access token');
+    }
+
+    const rawAccessToken = tokenResponseBody.access_token;
+
+    expect(rawAccessToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(persistedAuthorizationCode?.usedAt).toEqual(expect.any(Date));
+    expect(persistedAccessToken?.tokenHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(persistedAccessToken?.tokenHash).not.toBe(rawAccessToken);
+
+    await agent
+      .post('/token')
+      .set('Authorization', basicAuthorization)
+      .type('form')
+      .send(tokenRequestBody)
+      .expect(400)
+      .expect({
+        error: 'invalid_grant',
+        error_description: 'Authorization code tidak valid atau telah berakhir',
+      });
 
     await agent.post('/auth/logout').expect(204);
     expect(prisma.accessToken.updateMany).toHaveBeenCalled();
