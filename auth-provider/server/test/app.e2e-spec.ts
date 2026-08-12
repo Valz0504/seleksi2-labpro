@@ -67,9 +67,21 @@ describe('AppController (e2e)', () => {
     status: 'ACTIVE' as const,
     role: 'ADMIN' as const,
   };
+  let currentRole: 'ADMIN' | 'USER' = 'ADMIN';
+  const adminUserListRecord = () => ({
+    id: activeUser.id,
+    name: activeUser.name,
+    email: activeUser.email,
+    status: activeUser.status,
+    role: currentRole,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    userGroups: [],
+  });
   const prisma = {
     user: {
       findUnique: jest.fn(),
+      findMany: jest.fn(),
     },
     ssoSession: {
       create: jest.fn(),
@@ -83,6 +95,10 @@ describe('AppController (e2e)', () => {
     },
     application: {
       findUnique: jest.fn(),
+      findMany: jest.fn(),
+    },
+    group: {
+      findMany: jest.fn(),
     },
     applicationGroupPolicy: {
       findFirst: jest.fn(),
@@ -102,7 +118,14 @@ describe('AppController (e2e)', () => {
     activeUser.passwordHash = await hashPassword('correct-password');
     prisma.user.findUnique.mockImplementation(
       ({ where }: { where: { email: string } }) =>
-        Promise.resolve(where.email === activeUser.email ? activeUser : null),
+        Promise.resolve(
+          where.email === activeUser.email
+            ? { ...activeUser, role: currentRole }
+            : null,
+        ),
+    );
+    prisma.user.findMany.mockImplementation(() =>
+      Promise.resolve([adminUserListRecord()]),
     );
     prisma.ssoSession.create.mockImplementation(
       ({
@@ -131,7 +154,10 @@ describe('AppController (e2e)', () => {
       ({ where }: { where: { sessionTokenHash: string } }) =>
         Promise.resolve(
           persistedSession?.sessionTokenHash === where.sessionTokenHash
-            ? { ...persistedSession, user: activeUser }
+            ? {
+                ...persistedSession,
+                user: { ...activeUser, role: currentRole },
+              }
             : null,
         ),
     );
@@ -225,6 +251,37 @@ describe('AppController (e2e)', () => {
         });
       },
     );
+    prisma.application.findMany.mockResolvedValue([
+      {
+        id: applicationId,
+        name: 'App A',
+        clientId: 'app-a',
+        status: 'ACTIVE',
+        launchUrl: 'http://localhost:3002',
+        logoutNotificationUrl: 'http://localhost:3002/internal/logout',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        redirectUris: [
+          {
+            id: '44444444-4444-4444-8444-444444444444',
+            redirectUri: applicationRedirectUri,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+        ],
+        groupPolicies: [],
+      },
+    ]);
+    prisma.group.findMany.mockResolvedValue([
+      {
+        id: '55555555-5555-4555-8555-555555555555',
+        name: 'app-a-users',
+        description: 'Users allowed to access App A',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        userGroups: [],
+        policies: [],
+      },
+    ]);
     prisma.applicationGroupPolicy.findFirst.mockResolvedValue({
       id: '55555555-5555-4555-8555-555555555555',
     });
@@ -406,6 +463,41 @@ describe('AppController (e2e)', () => {
     });
   });
 
+  it('rejects admin APIs without a central session', () => {
+    return request(app.getHttpServer())
+      .get('/admin/users')
+      .expect(401)
+      .expect({
+        error: {
+          code: 'INVALID_SESSION',
+          message: 'Central session tidak ditemukan',
+        },
+      });
+  });
+
+  it('rejects an authenticated non-admin user from admin APIs', async () => {
+    const regularAgent = request.agent(app.getHttpServer());
+    currentRole = 'USER';
+
+    try {
+      await regularAgent
+        .post('/auth/login')
+        .send({ email: activeUser.email, password: 'correct-password' })
+        .expect(200);
+      await regularAgent
+        .get('/admin/users')
+        .expect(403)
+        .expect({
+          error: {
+            code: 'ADMIN_ACCESS_REQUIRED',
+            message: 'Akses administrator diperlukan',
+          },
+        });
+    } finally {
+      currentRole = 'ADMIN';
+    }
+  });
+
   it('completes login, authorization, token exchange, replay denial, and logout', async () => {
     const loginResponse = await agent
       .post('/auth/login')
@@ -431,6 +523,27 @@ describe('AppController (e2e)', () => {
     expect(setCookieHeader).toContain('HttpOnly');
     expect(setCookieHeader).toContain('SameSite=Lax');
     expect(setCookieHeader).not.toContain('correct-password');
+
+    await agent
+      .get('/admin/users')
+      .expect(200)
+      .expect(({ body }: { body: unknown }) => {
+        expect(body).toEqual([
+          {
+            ...adminUserListRecord(),
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ]);
+        expect(JSON.stringify(body)).not.toContain('passwordHash');
+      });
+    await agent.get('/admin/groups').expect(200);
+    await agent
+      .get('/admin/applications')
+      .expect(200)
+      .expect(({ body }: { body: unknown }) => {
+        expect(JSON.stringify(body)).not.toContain('clientSecretHash');
+      });
 
     await agent
       .get('/auth/session')
