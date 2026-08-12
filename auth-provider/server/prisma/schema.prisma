@@ -17,14 +17,96 @@ enum UserStatus {
   INACTIVE
 }
 
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum ApplicationStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PolicyEffect {
+  ALLOW
+}
+
 model User {
-  id           String     @id @default(uuid()) @db.Uuid
+  id           String      @id @default(uuid()) @db.Uuid
   name         String
-  email        String     @unique
-  passwordHash String     @map("password_hash")
-  status       UserStatus @default(ACTIVE)
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
+  email        String      @unique
+  passwordHash String      @map("password_hash")
+  status       UserStatus  @default(ACTIVE)
+  role         UserRole    @default(USER)
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  userGroups   UserGroup[]
 
   @@map("users")
+}
+
+model Group {
+  id          String                   @id @default(uuid()) @db.Uuid
+  name        String                   @unique
+  description String?                  @db.Text
+  createdAt   DateTime                 @default(now()) @map("created_at")
+  updatedAt   DateTime                 @updatedAt @map("updated_at")
+  userGroups  UserGroup[]
+  policies    ApplicationGroupPolicy[]
+
+  @@map("groups")
+}
+
+model UserGroup {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  groupId   String   @map("group_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id])
+  group     Group    @relation(fields: [groupId], references: [id])
+
+  @@unique([userId, groupId])
+  @@index([groupId])
+  @@map("user_groups")
+}
+
+model Application {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  name                  String
+  clientId              String                   @unique @map("client_id")
+  clientSecretHash      String?                  @map("client_secret_hash")
+  status                ApplicationStatus        @default(ACTIVE)
+  launchUrl             String?                  @map("launch_url") @db.Text
+  logoutNotificationUrl String                   @map("logout_notification_url") @db.Text
+  createdAt             DateTime                 @default(now()) @map("created_at")
+  updatedAt             DateTime                 @updatedAt @map("updated_at")
+  redirectUris          ApplicationRedirectUri[]
+  groupPolicies         ApplicationGroupPolicy[]
+
+  @@map("applications")
+}
+
+model ApplicationRedirectUri {
+  id            String      @id @default(uuid()) @db.Uuid
+  applicationId String      @map("application_id") @db.Uuid
+  redirectUri   String      @map("redirect_uri") @db.Text
+  createdAt     DateTime    @default(now()) @map("created_at")
+  application   Application @relation(fields: [applicationId], references: [id])
+
+  @@unique([applicationId, redirectUri])
+  @@map("application_redirect_uris")
+}
+
+model ApplicationGroupPolicy {
+  id            String       @id @default(uuid()) @db.Uuid
+  applicationId String       @map("application_id") @db.Uuid
+  groupId       String       @map("group_id") @db.Uuid
+  effect        PolicyEffect @default(ALLOW)
+  createdAt     DateTime     @default(now()) @map("created_at")
+  application   Application  @relation(fields: [applicationId], references: [id])
+  group         Group        @relation(fields: [groupId], references: [id])
+
+  @@unique([applicationId, groupId, effect])
+  @@index([groupId])
+  @@map("application_group_policies")
 }
