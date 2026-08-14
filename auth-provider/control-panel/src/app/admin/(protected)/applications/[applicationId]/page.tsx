@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getAdminApplication, type AdminApplication } from '@/lib/admin-session';
 import { ApplicationStatusForm } from './application-status-form';
+import { RedirectUriManager } from './redirect-uri-manager';
 import { UpdateApplicationForm } from './update-application-form';
 
 interface AdminApplicationDetailPageProps {
@@ -9,6 +10,7 @@ interface AdminApplicationDetailPageProps {
   searchParams: Promise<{
     updated?: string | string[];
     status?: string | string[];
+    redirectUri?: string | string[];
   }>;
 }
 
@@ -69,6 +71,7 @@ export default async function AdminApplicationDetailPage({
   const { application } = result;
   const wasUpdated = query.updated === '1';
   const statusResult = readSingle(query.status);
+  const redirectUriResult = readSingle(query.redirectUri);
 
   return (
     <>
@@ -115,6 +118,25 @@ export default async function AdminApplicationDetailPage({
         >
           Application diaktifkan kembali. Access token lama tetap tidak berlaku; client harus
           memulai Authorization Code Flow baru.
+        </div>
+      ) : null}
+
+      {redirectUriResult === 'added' ? (
+        <div
+          className="mt-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-semibold text-green-900"
+          role="status"
+        >
+          Redirect URI berhasil ditambahkan dan langsung tersedia untuk exact matching.
+        </div>
+      ) : null}
+
+      {redirectUriResult === 'removed' ? (
+        <div
+          className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold leading-6 text-amber-950"
+          role="status"
+        >
+          Redirect URI berhasil dihapus. Authorization code yang belum dipakai dan terikat pada URI
+          tersebut telah dibuat tidak berlaku.
         </div>
       ) : null}
 
@@ -197,7 +219,7 @@ export default async function AdminApplicationDetailPage({
         </div>
       </section>
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+      <div className="mt-8 space-y-8">
         <section>
           <p className="text-sm font-semibold text-blue-600">Callback tepercaya</p>
           <div className="mt-1 flex items-end justify-between gap-4">
@@ -206,15 +228,10 @@ export default async function AdminApplicationDetailPage({
               {application.redirectUris.length} URI
             </span>
           </div>
-          <div className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <ul className="divide-y divide-slate-100">
-              {application.redirectUris.map(({ id, redirectUri }) => (
-                <li className="break-all p-5 font-mono text-sm text-slate-700" key={id}>
-                  {redirectUri}
-                </li>
-              ))}
-            </ul>
-          </div>
+          <RedirectUriManager
+            applicationId={application.id}
+            redirectUris={application.redirectUris}
+          />
         </section>
 
         <section>
