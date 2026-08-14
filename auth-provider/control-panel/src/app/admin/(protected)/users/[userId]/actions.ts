@@ -4,29 +4,29 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { fetchAdminApi, readAdminErrorCode } from '@/lib/admin-api';
 
-type UserField = 'name' | 'email' | 'password';
+type UserProfileField = 'name' | 'email';
 
-export interface CreateUserActionState {
+export interface UpdateUserActionState {
   error: string | null;
-  fieldErrors: Partial<Record<UserField, string>>;
+  fieldErrors: Partial<Record<UserProfileField, string>>;
 }
 
-function readString(formData: FormData, name: UserField): string {
+function readString(formData: FormData, name: UserProfileField): string {
   const value = formData.get(name);
 
   return typeof value === 'string' ? value : '';
 }
 
-export async function createUserAction(
-  previousState: CreateUserActionState,
+export async function updateUserAction(
+  userId: string,
+  previousState: UpdateUserActionState,
   formData: FormData,
-): Promise<CreateUserActionState> {
+): Promise<UpdateUserActionState> {
   void previousState;
 
   const name = readString(formData, 'name').trim();
   const email = readString(formData, 'email').trim().toLowerCase();
-  const password = readString(formData, 'password');
-  const fieldErrors: CreateUserActionState['fieldErrors'] = {};
+  const fieldErrors: UpdateUserActionState['fieldErrors'] = {};
 
   if (name.length === 0 || name.length > 120) {
     fieldErrors.name = 'Nama wajib diisi dan maksimal 120 karakter.';
@@ -34,13 +34,10 @@ export async function createUserAction(
   if (email.length === 0 || email.length > 320) {
     fieldErrors.email = 'Email wajib diisi dan maksimal 320 karakter.';
   }
-  if (password.length < 8 || password.length > 1024) {
-    fieldErrors.password = 'Password harus terdiri dari 8–1024 karakter.';
-  }
 
   if (Object.keys(fieldErrors).length > 0) {
     return {
-      error: 'Periksa kembali data pengguna yang diisi.',
+      error: 'Periksa kembali profil pengguna yang diisi.',
       fieldErrors,
     };
   }
@@ -48,12 +45,10 @@ export async function createUserAction(
   let response: Response;
 
   try {
-    response = await fetchAdminApi('/admin/users', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ name, email, password }),
+    response = await fetchAdminApi(`/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, email }),
     });
   } catch {
     return {
@@ -74,21 +69,27 @@ export async function createUserAction(
 
     if (code === 'EMAIL_ALREADY_EXISTS') {
       return {
-        error: 'Pengguna belum dapat dibuat.',
+        error: 'Profil pengguna belum dapat diperbarui.',
         fieldErrors: { email: 'Email sudah digunakan oleh pengguna lain.' },
+      };
+    }
+    if (code === 'USER_NOT_FOUND') {
+      return {
+        error: 'Pengguna tidak lagi ditemukan. Kembali ke daftar pengguna.',
+        fieldErrors: {},
       };
     }
 
     return {
       error:
         response.status === 400
-          ? 'Data pengguna tidak valid. Periksa kembali seluruh field.'
-          : 'Pengguna belum dapat dibuat. Silakan coba lagi.',
+          ? 'Data profil tidak valid. Periksa kembali seluruh field.'
+          : 'Profil pengguna belum dapat diperbarui. Silakan coba lagi.',
       fieldErrors: {},
     };
   }
 
-  revalidatePath('/admin');
   revalidatePath('/admin/users');
-  redirect('/admin/users?created=1');
+  revalidatePath(`/admin/users/${userId}`);
+  redirect(`/admin/users/${encodeURIComponent(userId)}?updated=1`);
 }

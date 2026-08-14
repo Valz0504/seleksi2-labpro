@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { fetchAdminApi } from './admin-api';
 import { buildInternalAuthServerUrl } from './auth-server-url';
 
 export interface AdminSession {
@@ -42,6 +43,9 @@ export interface AdminUser {
   }>;
 }
 
+export type AdminUserLookup =
+  { status: 'success'; user: AdminUser } | { status: 'not_found' } | { status: 'error' };
+
 async function getCookieHeader(): Promise<string> {
   return (await cookies()).toString();
 }
@@ -64,11 +68,10 @@ export async function getCurrentAdminSession(): Promise<AdminSession | null> {
 }
 
 export async function getAdminOverview(): Promise<AdminOverview> {
-  const cookieHeader = await getCookieHeader();
   const [users, groups, applications] = await Promise.all([
-    getCollectionCount('/admin/users', cookieHeader),
-    getCollectionCount('/admin/groups', cookieHeader),
-    getCollectionCount('/admin/applications', cookieHeader),
+    getCollectionCount('/admin/users'),
+    getCollectionCount('/admin/groups'),
+    getCollectionCount('/admin/applications'),
   ]);
 
   return { users, groups, applications };
@@ -76,10 +79,7 @@ export async function getAdminOverview(): Promise<AdminOverview> {
 
 export async function getAdminUsers(): Promise<AdminUser[] | null> {
   try {
-    const response = await fetch(buildInternalAuthServerUrl('/admin/users'), {
-      headers: { cookie: await getCookieHeader() },
-      cache: 'no-store',
-    });
+    const response = await fetchAdminApi('/admin/users');
 
     if (!response.ok) {
       return null;
@@ -93,12 +93,33 @@ export async function getAdminUsers(): Promise<AdminUser[] | null> {
   }
 }
 
-async function getCollectionCount(path: string, cookieHeader: string): Promise<number | null> {
+export async function getAdminUser(userId: string): Promise<AdminUserLookup> {
   try {
-    const response = await fetch(buildInternalAuthServerUrl(path), {
-      headers: { cookie: cookieHeader },
-      cache: 'no-store',
-    });
+    const response = await fetchAdminApi(`/admin/users/${encodeURIComponent(userId)}`);
+
+    if (response.status === 404) {
+      return { status: 'not_found' };
+    }
+
+    if (!response.ok) {
+      return { status: 'error' };
+    }
+
+    const body = (await response.json()) as unknown;
+
+    if (typeof body !== 'object' || body === null || !('id' in body)) {
+      return { status: 'error' };
+    }
+
+    return { status: 'success', user: body as AdminUser };
+  } catch {
+    return { status: 'error' };
+  }
+}
+
+async function getCollectionCount(path: string): Promise<number | null> {
+  try {
+    const response = await fetchAdminApi(path);
 
     if (!response.ok) {
       return null;

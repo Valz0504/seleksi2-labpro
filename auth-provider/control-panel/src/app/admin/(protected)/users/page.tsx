@@ -128,6 +128,9 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
                   <th className="px-5 py-3 font-bold" scope="col">
                     Diperbarui
                   </th>
+                  <th className="px-5 py-3 text-right font-bold" scope="col">
+                    Aksi
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -162,6 +165,14 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
                     </td>
                     <td className="whitespace-nowrap px-5 py-4 text-slate-500">
                       {formatDate(user.updatedAt)} WIB
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <Link
+                        className="font-bold text-blue-700 hover:text-blue-800"
+                        href={`/admin/users/${encodeURIComponent(user.id)}`}
+                      >
+                        Lihat detail
+                      </Link>
                     </td>
                   </tr>
                 ))}
