@@ -61,7 +61,9 @@ export class AuthController {
     const sessionToken = this.sessionCookieService.read(request);
 
     if (sessionToken) {
-      await this.authService.logout(sessionToken);
+      await this.authService.logout(sessionToken, {
+        ipAddress: request.ip?.slice(0, 45),
+      });
     }
 
     this.sessionCookieService.clear(response);

@@ -72,6 +72,16 @@ export class AuthService {
     );
 
     if (!user || !passwordMatches || user.status !== 'ACTIVE') {
+      await this.prisma.auditLog.create({
+        data: {
+          eventType: 'LoginFailed',
+          userId: user?.id,
+          result: 'FAILED',
+          metadata: { reason: 'invalid_credentials' },
+          ipAddress: context.ipAddress,
+        },
+      });
+
       throw this.invalidCredentialsException();
     }
 
@@ -81,21 +91,37 @@ export class AuthService {
       'SSO_SESSION_TTL_SECONDS',
     );
     const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
-    const session = await this.prisma.ssoSession.create({
-      data: {
-        userId: user.id,
-        sessionTokenHash: hashOpaqueToken(sessionToken),
-        expiresAt,
-        lastActivityAt: now,
-        ipAddress: context.ipAddress,
-        userAgent: context.userAgent,
-      },
-      select: {
-        id: true,
-        status: true,
-        createdAt: true,
-        expiresAt: true,
-      },
+    const session = await this.prisma.$transaction(async (transaction) => {
+      const createdSession = await transaction.ssoSession.create({
+        data: {
+          userId: user.id,
+          sessionTokenHash: hashOpaqueToken(sessionToken),
+          expiresAt,
+          lastActivityAt: now,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+        },
+        select: {
+          id: true,
+          status: true,
+          createdAt: true,
+          expiresAt: true,
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          eventType: 'LoginSucceeded',
+          actorId: user.id,
+          userId: user.id,
+          sessionId: createdSession.id,
+          result: 'SUCCESS',
+          metadata: { authenticationMethod: 'password' },
+          ipAddress: context.ipAddress,
+        },
+      });
+
+      return createdSession;
     });
 
     return {
@@ -191,10 +217,13 @@ export class AuthService {
     };
   }
 
-  async logout(sessionToken: string): Promise<void> {
+  async logout(
+    sessionToken: string,
+    context: Pick<RequestContext, 'ipAddress'> = {},
+  ): Promise<void> {
     const session = await this.prisma.ssoSession.findUnique({
       where: { sessionTokenHash: hashOpaqueToken(sessionToken) },
-      select: { id: true },
+      select: { id: true, userId: true },
     });
 
     if (!session) {
@@ -203,8 +232,8 @@ export class AuthService {
 
     const now = new Date();
 
-    await this.prisma.$transaction([
-      this.prisma.ssoSession.updateMany({
+    await this.prisma.$transaction(async (transaction) => {
+      const revokedSession = await transaction.ssoSession.updateMany({
         where: {
           id: session.id,
           status: 'ACTIVE',
@@ -215,8 +244,13 @@ export class AuthService {
           revokedAt: now,
           revokeReason: 'sso_logout',
         },
-      }),
-      this.prisma.accessToken.updateMany({
+      });
+
+      if (revokedSession.count !== 1) {
+        return;
+      }
+
+      await transaction.accessToken.updateMany({
         where: {
           ssoSessionId: session.id,
           status: 'ACTIVE',
@@ -226,8 +260,19 @@ export class AuthService {
           status: 'REVOKED',
           revokedAt: now,
         },
-      }),
-    ]);
+      });
+      await transaction.auditLog.create({
+        data: {
+          eventType: 'Logout',
+          actorId: session.userId,
+          userId: session.userId,
+          sessionId: session.id,
+          result: 'SUCCESS',
+          metadata: { reason: 'sso_logout' },
+          ipAddress: context.ipAddress,
+        },
+      });
+    });
   }
 
   private invalidCredentialsException(): UnauthorizedException {

@@ -51,6 +51,7 @@ describe('AppController (e2e)', () => {
   let persistedSession:
     | {
         id: string;
+        userId: string;
         sessionTokenHash: string;
         status: 'ACTIVE' | 'REVOKED';
         createdAt: Date;
@@ -113,6 +114,27 @@ describe('AppController (e2e)', () => {
     },
     $transaction: jest.fn(),
   };
+  const findAuditEvent = (eventType: string) => {
+    const calls = prisma.auditLog.create.mock.calls as unknown as Array<
+      [
+        {
+          data: {
+            eventType: string;
+            userId?: string;
+            sessionId?: string;
+            result: string;
+            metadata?: unknown;
+          };
+        },
+      ]
+    >;
+
+    return calls
+      .map(([input]) => input.data)
+      .find((event) => {
+        return event.eventType === eventType;
+      });
+  };
 
   beforeAll(async () => {
     activeUser.passwordHash = await hashPassword('correct-password');
@@ -132,6 +154,7 @@ describe('AppController (e2e)', () => {
         data,
       }: {
         data: {
+          userId: string;
           sessionTokenHash: string;
           expiresAt: Date;
           lastActivityAt: Date;
@@ -139,6 +162,7 @@ describe('AppController (e2e)', () => {
       }) => {
         persistedSession = {
           id: '22222222-2222-4222-8222-222222222222',
+          userId: data.userId,
           sessionTokenHash: data.sessionTokenHash,
           status: 'ACTIVE',
           createdAt: new Date(),
@@ -408,6 +432,16 @@ describe('AppController (e2e)', () => {
           code: 'INVALID_CREDENTIALS',
           message: 'Email atau password tidak valid',
         },
+      })
+      .expect(() => {
+        expect(findAuditEvent('LoginFailed')).toMatchObject({
+          eventType: 'LoginFailed',
+          result: 'FAILED',
+          metadata: { reason: 'invalid_credentials' },
+        });
+        expect(JSON.stringify(prisma.auditLog.create.mock.calls)).not.toContain(
+          'wrong-password',
+        );
       });
   });
 
@@ -523,6 +557,12 @@ describe('AppController (e2e)', () => {
     expect(setCookieHeader).toContain('HttpOnly');
     expect(setCookieHeader).toContain('SameSite=Lax');
     expect(setCookieHeader).not.toContain('correct-password');
+    expect(findAuditEvent('LoginSucceeded')).toMatchObject({
+      eventType: 'LoginSucceeded',
+      userId: activeUser.id,
+      sessionId: persistedSession?.id,
+      result: 'SUCCESS',
+    });
 
     await agent
       .get('/admin/users')
@@ -649,6 +689,13 @@ describe('AppController (e2e)', () => {
 
     await agent.post('/auth/logout').expect(204);
     expect(prisma.accessToken.updateMany).toHaveBeenCalled();
+    expect(findAuditEvent('Logout')).toMatchObject({
+      eventType: 'Logout',
+      userId: activeUser.id,
+      sessionId: persistedSession?.id,
+      result: 'SUCCESS',
+      metadata: { reason: 'sso_logout' },
+    });
 
     await agent.get('/auth/session').expect(401);
     await agent
