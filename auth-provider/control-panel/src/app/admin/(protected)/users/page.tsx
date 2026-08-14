@@ -1,6 +1,12 @@
 import Link from 'next/link';
 import { getAdminUsers, type AdminUser } from '@/lib/admin-session';
 
+interface AdminUsersPageProps {
+  searchParams: Promise<{
+    created?: string | string[];
+  }>;
+}
+
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat('id-ID', {
     dateStyle: 'medium',
@@ -23,8 +29,9 @@ function StatusBadge({ status }: Pick<AdminUser, 'status'>) {
   );
 }
 
-export default async function AdminUsersPage() {
-  const users = await getAdminUsers();
+export default async function AdminUsersPage({ searchParams }: AdminUsersPageProps) {
+  const [users, query] = await Promise.all([getAdminUsers(), searchParams]);
+  const wasCreated = query.created === '1';
 
   if (!users) {
     return (
@@ -50,12 +57,33 @@ export default async function AdminUsersPage() {
   return (
     <>
       <section>
-        <p className="text-sm font-semibold text-blue-600">Pengguna</p>
-        <h2 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">Daftar pengguna</h2>
-        <p className="mt-3 max-w-2xl leading-7 text-slate-600">
-          Lihat identitas, role, status akun, dan group yang menentukan akses setiap pengguna.
-        </p>
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-blue-600">Pengguna</p>
+            <h2 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">
+              Daftar pengguna
+            </h2>
+            <p className="mt-3 max-w-2xl leading-7 text-slate-600">
+              Lihat identitas, role, status akun, dan group yang menentukan akses setiap pengguna.
+            </p>
+          </div>
+          <Link
+            className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg bg-blue-600 px-5 text-sm font-bold text-white transition hover:bg-blue-700 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-blue-600/30"
+            href="/admin/users/new"
+          >
+            Tambah pengguna
+          </Link>
+        </div>
       </section>
+
+      {wasCreated ? (
+        <div
+          className="mt-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-semibold text-green-900"
+          role="status"
+        >
+          Pengguna berhasil dibuat dan sudah aktif.
+        </div>
+      ) : null}
 
       <section className="mt-8 grid gap-4 sm:grid-cols-3" aria-label="Ringkasan pengguna">
         <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
