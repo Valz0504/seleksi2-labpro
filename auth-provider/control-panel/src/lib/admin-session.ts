@@ -104,6 +104,11 @@ export type AdminUserLookup =
 export type AdminGroupLookup =
   { status: 'success'; group: AdminGroup } | { status: 'not_found' } | { status: 'error' };
 
+export type AdminApplicationLookup =
+  | { status: 'success'; application: AdminApplication }
+  | { status: 'not_found' }
+  | { status: 'error' };
+
 async function getCookieHeader(): Promise<string> {
   return (await cookies()).toString();
 }
@@ -180,6 +185,32 @@ export async function getAdminApplications(): Promise<AdminApplication[] | null>
     return Array.isArray(body) ? (body as AdminApplication[]) : null;
   } catch {
     return null;
+  }
+}
+
+export async function getAdminApplication(applicationId: string): Promise<AdminApplicationLookup> {
+  try {
+    const response = await fetchAdminApi(
+      `/admin/applications/${encodeURIComponent(applicationId)}`,
+    );
+
+    if (response.status === 404) {
+      return { status: 'not_found' };
+    }
+
+    if (!response.ok) {
+      return { status: 'error' };
+    }
+
+    const body = (await response.json()) as unknown;
+
+    if (typeof body !== 'object' || body === null || !('id' in body)) {
+      return { status: 'error' };
+    }
+
+    return { status: 'success', application: body as AdminApplication };
+  } catch {
+    return { status: 'error' };
   }
 }
 

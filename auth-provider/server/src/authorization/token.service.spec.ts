@@ -160,6 +160,21 @@ describe('TokenService', () => {
     expect(transaction.authorizationCode.findUnique).not.toHaveBeenCalled();
   });
 
+  it('rejects an inactive client before looking up or consuming the code', async () => {
+    prisma.application.findUnique.mockResolvedValue({
+      id: applicationId,
+      status: 'INACTIVE',
+      clientSecretHash: hashSecret(clientSecret),
+    });
+
+    await expect(
+      tokenService.exchange(validRequest, basicAuthorization, {}),
+    ).rejects.toMatchObject({ code: 'invalid_client', statusCode: 401 });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(transaction.authorizationCode.findUnique).not.toHaveBeenCalled();
+    expect(transaction.authorizationCode.updateMany).not.toHaveBeenCalled();
+  });
+
   it('does not consume a code when redirect URI or PKCE does not match', async () => {
     await expect(
       tokenService.exchange(

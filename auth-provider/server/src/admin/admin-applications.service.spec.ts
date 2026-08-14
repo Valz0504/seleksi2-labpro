@@ -126,6 +126,7 @@ describe('AdminApplicationsService', () => {
       where: { applicationId, status: 'ACTIVE', revokedAt: null },
       data: { status: 'REVOKED' },
     });
+    expect(transaction.ssoSession.updateMany).not.toHaveBeenCalled();
   });
 
   it('revokes users who lose their final policy path after policy removal', async () => {

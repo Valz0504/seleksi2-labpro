@@ -148,6 +148,25 @@ describe('AuthorizationService', () => {
     expect(prisma.authorizationCode.create).not.toHaveBeenCalled();
   });
 
+  it('rejects an inactive application before reading the central session', async () => {
+    prisma.application.findUnique.mockResolvedValue({
+      id: '33333333-3333-4333-8333-333333333333',
+      status: 'INACTIVE',
+      redirectUris: [{ id: '44444444-4444-4444-8444-444444444444' }],
+    });
+
+    const error = await authorizationService
+      .authorize(validRequest, 'valid-session-token', {})
+      .catch((caughtError: unknown) => caughtError);
+
+    expect(error).toBeInstanceOf(AuthorizationRequestError);
+    expect((error as AuthorizationRequestError).code).toBe(
+      'unauthorized_client',
+    );
+    expect(authService.getCurrentSession).not.toHaveBeenCalled();
+    expect(prisma.authorizationCode.create).not.toHaveBeenCalled();
+  });
+
   it('returns login_required only through a previously trusted callback', async () => {
     const error = await authorizationService
       .authorize(validRequest, null, {})
