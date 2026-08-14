@@ -1,3 +1,4 @@
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { verifySecret } from '../common/security/secret';
 import { PrismaService } from '../database/prisma.service';
 import { AdminApplicationsService } from './admin-applications.service';
@@ -29,7 +30,19 @@ describe('AdminApplicationsService', () => {
     groupPolicies: [],
   };
   const transaction = {
-    application: { create: jest.fn(), update: jest.fn() },
+    $queryRaw: jest.fn(),
+    application: {
+      create: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
+    applicationRedirectUri: {
+      count: jest.fn(),
+      create: jest.fn(),
+      delete: jest.fn(),
+      findUnique: jest.fn(),
+    },
+    authorizationCode: { updateMany: jest.fn() },
     accessToken: { updateMany: jest.fn() },
     applicationGroupPolicy: {
       delete: jest.fn(),
@@ -51,7 +64,16 @@ describe('AdminApplicationsService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     transaction.application.create.mockResolvedValue(applicationRecord);
+    transaction.$queryRaw.mockResolvedValue([{ id: applicationId }]);
+    transaction.application.findUnique.mockResolvedValue(applicationRecord);
     transaction.application.update.mockResolvedValue(applicationRecord);
+    transaction.applicationRedirectUri.count.mockResolvedValue(1);
+    transaction.applicationRedirectUri.create.mockResolvedValue(
+      applicationRecord.redirectUris[0],
+    );
+    transaction.applicationRedirectUri.delete.mockResolvedValue({});
+    transaction.applicationRedirectUri.findUnique.mockResolvedValue(null);
+    transaction.authorizationCode.updateMany.mockResolvedValue({ count: 1 });
     transaction.accessToken.updateMany.mockResolvedValue({ count: 1 });
     transaction.auditLog.create.mockResolvedValue({});
     transaction.applicationGroupPolicy.delete.mockResolvedValue({});
@@ -127,6 +149,124 @@ describe('AdminApplicationsService', () => {
       data: { status: 'REVOKED' },
     });
     expect(transaction.ssoSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('adds an exact redirect URI while holding the application lock', async () => {
+    const redirectUri = 'http://localhost:4001/auth/callback';
+    transaction.applicationRedirectUri.create.mockResolvedValue({
+      id: '55555555-5555-4555-8555-555555555555',
+      redirectUri,
+      createdAt: new Date(),
+    });
+
+    const result = await service.addRedirectUri(
+      applicationId,
+      { redirectUri },
+      actor,
+    );
+
+    expect(transaction.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(transaction.applicationRedirectUri.create).toHaveBeenCalledWith({
+      data: { applicationId, redirectUri },
+      select: { id: true, redirectUri: true, createdAt: true },
+    });
+    expect(result.redirectUri).toBe(redirectUri);
+    expect(transaction.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: { action: 'REDIRECT_URI_ADDED', redirectUri },
+        }) as unknown,
+      }),
+    );
+  });
+
+  it('rejects a duplicate redirect URI without creating another record', async () => {
+    transaction.applicationRedirectUri.findUnique.mockResolvedValue({
+      id: applicationRecord.redirectUris[0].id,
+    });
+
+    await expect(
+      service.addRedirectUri(
+        applicationId,
+        { redirectUri: applicationRecord.redirectUris[0].redirectUri },
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(transaction.applicationRedirectUri.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects redirect URIs containing credentials or fragments', async () => {
+    await expect(
+      service.addRedirectUri(
+        applicationId,
+        { redirectUri: 'https://user:secret@example.com/callback#fragment' },
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(transaction.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('keeps at least one redirect URI for every application', async () => {
+    await expect(
+      service.removeRedirectUri(
+        applicationId,
+        applicationRecord.redirectUris[0].id,
+        actor,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'REDIRECT_URI_MINIMUM_REQUIRED',
+        },
+      },
+    });
+    expect(transaction.applicationRedirectUri.delete).not.toHaveBeenCalled();
+    expect(transaction.authorizationCode.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('invalidates unused authorization codes when a redirect URI is removed', async () => {
+    const removedRedirectUri = applicationRecord.redirectUris[0];
+    transaction.application.findUnique.mockResolvedValue({
+      ...applicationRecord,
+      redirectUris: [
+        removedRedirectUri,
+        {
+          id: '66666666-6666-4666-8666-666666666666',
+          redirectUri: 'http://localhost:4001/auth/callback',
+          createdAt: new Date(),
+        },
+      ],
+    });
+
+    await service.removeRedirectUri(
+      applicationId,
+      removedRedirectUri.id,
+      actor,
+    );
+
+    expect(transaction.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(transaction.applicationRedirectUri.delete).toHaveBeenCalledWith({
+      where: { id: removedRedirectUri.id },
+    });
+    expect(transaction.authorizationCode.updateMany).toHaveBeenCalledWith({
+      where: {
+        applicationId,
+        redirectUri: removedRedirectUri.redirectUri,
+        usedAt: null,
+      },
+      data: { usedAt: expect.any(Date) as unknown },
+    });
+    expect(transaction.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: {
+            action: 'REDIRECT_URI_REMOVED',
+            redirectUri: removedRedirectUri.redirectUri,
+            invalidatedAuthorizationCodeCount: 1,
+          },
+        }) as unknown,
+      }),
+    );
   });
 
   it('revokes users who lose their final policy path after policy removal', async () => {

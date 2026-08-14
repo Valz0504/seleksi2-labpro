@@ -257,28 +257,51 @@ export class AdminApplicationsService {
     input: CreateRedirectUriDto,
     actor: AdminActor,
   ) {
-    await this.assertApplicationExists(applicationId);
-    const existingRedirectUri =
-      await this.prisma.applicationRedirectUri.findUnique({
-        where: {
-          applicationId_redirectUri: {
-            applicationId,
-            redirectUri: input.redirectUri,
-          },
-        },
-        select: { id: true },
-      });
-
-    if (existingRedirectUri) {
-      throw new ConflictException({
-        error: {
-          code: 'REDIRECT_URI_ALREADY_EXISTS',
-          message: 'Redirect URI sudah terdaftar untuk aplikasi ini',
-        },
-      });
+    if (!this.isSupportedRedirectUri(input.redirectUri)) {
+      throw this.invalidRequest(
+        'Redirect URI harus berupa URL HTTP/HTTPS tanpa credential atau fragment',
+      );
     }
 
     return this.prisma.$transaction(async (transaction) => {
+      const lockedApplications = await transaction.$queryRaw<
+        Array<{ id: string }>
+      >`SELECT "id" FROM "applications" WHERE "id" = ${applicationId}::uuid FOR UPDATE`;
+
+      if (lockedApplications.length === 0) {
+        throw this.applicationNotFound();
+      }
+
+      const [existingRedirectUri, redirectUriCount] = await Promise.all([
+        transaction.applicationRedirectUri.findUnique({
+          where: {
+            applicationId_redirectUri: {
+              applicationId,
+              redirectUri: input.redirectUri,
+            },
+          },
+          select: { id: true },
+        }),
+        transaction.applicationRedirectUri.count({ where: { applicationId } }),
+      ]);
+
+      if (existingRedirectUri) {
+        throw new ConflictException({
+          error: {
+            code: 'REDIRECT_URI_ALREADY_EXISTS',
+            message: 'Redirect URI sudah terdaftar untuk aplikasi ini',
+          },
+        });
+      }
+      if (redirectUriCount >= 20) {
+        throw new BadRequestException({
+          error: {
+            code: 'REDIRECT_URI_LIMIT_REACHED',
+            message: 'Aplikasi hanya dapat memiliki maksimal 20 redirect URI',
+          },
+        });
+      }
+
       const redirectUri = await transaction.applicationRedirectUri.create({
         data: { applicationId, redirectUri: input.redirectUri },
         select: { id: true, redirectUri: true, createdAt: true },
@@ -308,53 +331,65 @@ export class AdminApplicationsService {
     redirectUriId: string,
     actor: AdminActor,
   ): Promise<void> {
-    const application = await this.prisma.application.findUnique({
-      where: { id: applicationId },
-      select: {
-        id: true,
-        redirectUris: {
-          select: { id: true, redirectUri: true },
-          orderBy: { createdAt: 'asc' },
-        },
-      },
-    });
-
-    if (!application) {
-      throw this.applicationNotFound();
-    }
-
-    const redirectUri = application.redirectUris.find(
-      ({ id }) => id === redirectUriId,
-    );
-
-    if (!redirectUri) {
-      throw new NotFoundException({
-        error: {
-          code: 'REDIRECT_URI_NOT_FOUND',
-          message: 'Redirect URI tidak ditemukan untuk aplikasi ini',
-        },
-      });
-    }
-    if (application.redirectUris.length === 1) {
-      throw this.invalidRequest(
-        'Aplikasi harus memiliki setidaknya satu redirect URI',
-      );
-    }
-
     const now = new Date();
 
     await this.prisma.$transaction(async (transaction) => {
+      const lockedApplications = await transaction.$queryRaw<
+        Array<{ id: string }>
+      >`SELECT "id" FROM "applications" WHERE "id" = ${applicationId}::uuid FOR UPDATE`;
+
+      if (lockedApplications.length === 0) {
+        throw this.applicationNotFound();
+      }
+
+      const application = await transaction.application.findUnique({
+        where: { id: applicationId },
+        select: {
+          id: true,
+          redirectUris: {
+            select: { id: true, redirectUri: true },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      });
+
+      if (!application) {
+        throw this.applicationNotFound();
+      }
+
+      const redirectUri = application.redirectUris.find(
+        ({ id }) => id === redirectUriId,
+      );
+
+      if (!redirectUri) {
+        throw new NotFoundException({
+          error: {
+            code: 'REDIRECT_URI_NOT_FOUND',
+            message: 'Redirect URI tidak ditemukan untuk aplikasi ini',
+          },
+        });
+      }
+      if (application.redirectUris.length === 1) {
+        throw new BadRequestException({
+          error: {
+            code: 'REDIRECT_URI_MINIMUM_REQUIRED',
+            message: 'Aplikasi harus memiliki setidaknya satu redirect URI',
+          },
+        });
+      }
+
       await transaction.applicationRedirectUri.delete({
         where: { id: redirectUriId },
       });
-      await transaction.authorizationCode.updateMany({
-        where: {
-          applicationId,
-          redirectUri: redirectUri.redirectUri,
-          usedAt: null,
-        },
-        data: { usedAt: now },
-      });
+      const invalidatedAuthorizationCodes =
+        await transaction.authorizationCode.updateMany({
+          where: {
+            applicationId,
+            redirectUri: redirectUri.redirectUri,
+            usedAt: null,
+          },
+          data: { usedAt: now },
+        });
       await transaction.auditLog.create({
         data: {
           eventType: 'ApplicationChanged',
@@ -365,6 +400,8 @@ export class AdminApplicationsService {
           metadata: {
             action: 'REDIRECT_URI_REMOVED',
             redirectUri: redirectUri.redirectUri,
+            invalidatedAuthorizationCodeCount:
+              invalidatedAuthorizationCodes.count,
           },
           ipAddress: actor.ipAddress,
         },
@@ -519,17 +556,6 @@ export class AdminApplicationsService {
     });
   }
 
-  private async assertApplicationExists(applicationId: string): Promise<void> {
-    const application = await this.prisma.application.findUnique({
-      where: { id: applicationId },
-      select: { id: true },
-    });
-
-    if (!application) {
-      throw this.applicationNotFound();
-    }
-  }
-
   private applicationNotFound(): NotFoundException {
     return new NotFoundException({
       error: {
@@ -543,5 +569,21 @@ export class AdminApplicationsService {
     return new BadRequestException({
       error: { code: 'INVALID_ADMIN_REQUEST', message },
     });
+  }
+
+  private isSupportedRedirectUri(value: string): boolean {
+    try {
+      const redirectUri = new URL(value);
+
+      return (
+        (redirectUri.protocol === 'http:' ||
+          redirectUri.protocol === 'https:') &&
+        redirectUri.username === '' &&
+        redirectUri.password === '' &&
+        redirectUri.hash === ''
+      );
+    } catch {
+      return false;
+    }
   }
 }
