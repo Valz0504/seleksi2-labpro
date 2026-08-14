@@ -135,6 +135,40 @@ describe('AuthService', () => {
     );
   });
 
+  it('does not create an admin session for a valid non-admin account', async () => {
+    const passwordHash = await hashPassword('correct-password');
+
+    prisma.user.findUnique.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      name: 'Regular User',
+      email: 'user@example.com',
+      passwordHash,
+      status: 'ACTIVE',
+      role: 'USER',
+    });
+
+    await expect(
+      authService.login(
+        'user@example.com',
+        'correct-password',
+        {},
+        {
+          requiredRole: 'ADMIN',
+        },
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(prisma.ssoSession.create).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        eventType: 'LoginFailed',
+        userId: '11111111-1111-4111-8111-111111111111',
+        result: 'FAILED',
+        metadata: { reason: 'invalid_credentials' },
+        ipAddress: undefined,
+      },
+    });
+  });
+
   it('marks an elapsed active session as expired', async () => {
     prisma.ssoSession.findUnique.mockResolvedValue({
       id: '22222222-2222-4222-8222-222222222222',

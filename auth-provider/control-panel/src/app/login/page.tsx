@@ -1,3 +1,5 @@
+import { buildPublicAuthServerUrl } from '@/lib/auth-server-url';
+
 interface LoginPageProps {
   searchParams: Promise<{
     error?: string | string[];
@@ -29,20 +31,6 @@ function readAuthorizationClient(returnTo: string | undefined): string | null {
   } catch {
     return null;
   }
-}
-
-function getLoginAction(): string {
-  const authServerUrl = new URL(process.env.AUTH_SERVER_PUBLIC_URL ?? 'http://localhost:3001');
-
-  if (
-    (authServerUrl.protocol !== 'http:' && authServerUrl.protocol !== 'https:') ||
-    authServerUrl.username !== '' ||
-    authServerUrl.password !== ''
-  ) {
-    throw new Error('AUTH_SERVER_PUBLIC_URL harus berupa URL HTTP(S) yang valid');
-  }
-
-  return new URL('/auth/login/continue', authServerUrl).toString();
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
@@ -90,7 +78,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </div>
         ) : null}
 
-        <form className="mt-6 flex flex-col" action={getLoginAction()} method="post">
+        <form
+          className="mt-6 flex flex-col"
+          action={buildPublicAuthServerUrl('/auth/login/continue')}
+          method="post"
+        >
           <input type="hidden" name="returnTo" value={returnTo} />
 
           <label className="mb-2 text-sm font-semibold text-slate-700" htmlFor="email">

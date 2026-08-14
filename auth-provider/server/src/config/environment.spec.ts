@@ -5,6 +5,8 @@ describe('validateEnvironment', () => {
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/auth_provider',
     SSO_COOKIE_SECRET: 'a-secure-cookie-secret-with-at-least-32-characters',
     AUTH_LOGIN_URL: 'http://localhost:3000/login',
+    CONTROL_PANEL_ADMIN_LOGIN_URL: 'http://localhost:3000/admin/login',
+    CONTROL_PANEL_ADMIN_DASHBOARD_URL: 'http://localhost:3000/admin',
   };
 
   it('applies safe development defaults for session and OAuth lifetimes', () => {

@@ -85,6 +85,42 @@ export class AuthController {
     }
   }
 
+  @Post('login/admin')
+  async loginAdmin(
+    @Body() loginDto: LoginDto,
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    try {
+      const result = await this.authService.login(
+        loginDto.email,
+        loginDto.password,
+        {
+          ipAddress: request.ip?.slice(0, 45),
+          userAgent: request.get('user-agent'),
+        },
+        { requiredRole: 'ADMIN' },
+      );
+
+      this.sessionCookieService.write(response, result.sessionToken);
+      response.redirect(
+        HttpStatus.SEE_OTHER,
+        this.frontChannelLoginService.getAdminDashboardUrl(),
+      );
+    } catch (error: unknown) {
+      if (!(error instanceof UnauthorizedException)) {
+        throw error;
+      }
+
+      response.redirect(
+        HttpStatus.SEE_OTHER,
+        this.frontChannelLoginService.buildAdminLoginPageUrl(
+          'invalid_credentials',
+        ),
+      );
+    }
+  }
+
   @Get('session')
   getCurrentSession(@Req() request: Request) {
     const sessionToken = this.requireSessionToken(request);
@@ -98,15 +134,19 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<void> {
-    const sessionToken = this.sessionCookieService.read(request);
+    await this.clearCurrentSession(request, response);
+  }
 
-    if (sessionToken) {
-      await this.authService.logout(sessionToken, {
-        ipAddress: request.ip?.slice(0, 45),
-      });
-    }
-
-    this.sessionCookieService.clear(response);
+  @Post('logout/admin')
+  async logoutAdmin(
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    await this.clearCurrentSession(request, response);
+    response.redirect(
+      HttpStatus.SEE_OTHER,
+      this.frontChannelLoginService.buildAdminLoginPageUrl(),
+    );
   }
 
   private requireSessionToken(request: Request): string {
@@ -122,5 +162,20 @@ export class AuthController {
     }
 
     return sessionToken;
+  }
+
+  private async clearCurrentSession(
+    request: Request,
+    response: Response,
+  ): Promise<void> {
+    const sessionToken = this.sessionCookieService.read(request);
+
+    if (sessionToken) {
+      await this.authService.logout(sessionToken, {
+        ipAddress: request.ip?.slice(0, 45),
+      });
+    }
+
+    this.sessionCookieService.clear(response);
   }
 }

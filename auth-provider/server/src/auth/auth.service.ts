@@ -15,6 +15,10 @@ interface RequestContext {
   userAgent?: string;
 }
 
+interface LoginRequirements {
+  requiredRole?: SessionUser['role'];
+}
+
 export interface SessionUser {
   id: string;
   name: string;
@@ -53,6 +57,7 @@ export class AuthService {
     email: string,
     password: string,
     context: RequestContext,
+    requirements: LoginRequirements = {},
   ): Promise<LoginResult> {
     const normalizedEmail = email.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({
@@ -71,7 +76,13 @@ export class AuthService {
       password,
     );
 
-    if (!user || !passwordMatches || user.status !== 'ACTIVE') {
+    if (
+      !user ||
+      !passwordMatches ||
+      user.status !== 'ACTIVE' ||
+      (requirements.requiredRole !== undefined &&
+        user.role !== requirements.requiredRole)
+    ) {
       await this.prisma.auditLog.create({
         data: {
           eventType: 'LoginFailed',

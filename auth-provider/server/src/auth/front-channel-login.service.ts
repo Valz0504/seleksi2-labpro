@@ -52,6 +52,26 @@ export class FrontChannelLoginService {
     return loginPageUrl.toString();
   }
 
+  buildAdminLoginPageUrl(error?: LoginPageError): string {
+    const loginPageUrl = new URL(
+      this.configService.getOrThrow<string>('CONTROL_PANEL_ADMIN_LOGIN_URL'),
+    );
+
+    if (error) {
+      loginPageUrl.searchParams.set('error', error);
+    } else {
+      loginPageUrl.searchParams.delete('error');
+    }
+
+    return loginPageUrl.toString();
+  }
+
+  getAdminDashboardUrl(): string {
+    return this.configService.getOrThrow<string>(
+      'CONTROL_PANEL_ADMIN_DASHBOARD_URL',
+    );
+  }
+
   private invalidReturnToException(): BadRequestException {
     return new BadRequestException({
       error: {

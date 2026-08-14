@@ -4,7 +4,11 @@ import { FrontChannelLoginService } from './front-channel-login.service';
 
 describe('FrontChannelLoginService', () => {
   const service = new FrontChannelLoginService(
-    new ConfigService({ AUTH_LOGIN_URL: 'http://localhost:3000/login' }),
+    new ConfigService({
+      AUTH_LOGIN_URL: 'http://localhost:3000/login',
+      CONTROL_PANEL_ADMIN_LOGIN_URL: 'http://localhost:3000/admin/login',
+      CONTROL_PANEL_ADMIN_DASHBOARD_URL: 'http://localhost:3000/admin',
+    }),
   );
   const returnTo =
     '/authorize?client_id=app-a&redirect_uri=http%3A%2F%2Flocalhost%3A3002%2Fauth%2Fcallback';
@@ -42,5 +46,17 @@ describe('FrontChannelLoginService', () => {
 
     expect(loginPageUrl.searchParams.get('error')).toBe('invalid_credentials');
     expect(loginPageUrl.toString()).not.toContain('password');
+  });
+
+  it('builds fixed admin login and dashboard destinations', () => {
+    const loginPageUrl = new URL(
+      service.buildAdminLoginPageUrl('invalid_credentials'),
+    );
+
+    expect(loginPageUrl.origin + loginPageUrl.pathname).toBe(
+      'http://localhost:3000/admin/login',
+    );
+    expect(loginPageUrl.searchParams.get('error')).toBe('invalid_credentials');
+    expect(service.getAdminDashboardUrl()).toBe('http://localhost:3000/admin');
   });
 });

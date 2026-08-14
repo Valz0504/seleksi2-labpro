@@ -589,6 +589,59 @@ describe('AppController (e2e)', () => {
     expect(callbackUrl.searchParams.get('state')).toBe(validState);
   });
 
+  it('rejects a non-admin account from the browser admin login', async () => {
+    currentRole = 'USER';
+
+    try {
+      const response = await request(app.getHttpServer())
+        .post('/auth/login/admin')
+        .type('form')
+        .send({
+          email: activeUser.email,
+          password: 'correct-password',
+        })
+        .expect(303);
+      const loginPageUrl = new URL(response.headers['location']);
+
+      expect(loginPageUrl.origin + loginPageUrl.pathname).toBe(
+        'http://localhost:3000/admin/login',
+      );
+      expect(loginPageUrl.searchParams.get('error')).toBe(
+        'invalid_credentials',
+      );
+      expect(response.headers['set-cookie']).toBeUndefined();
+    } finally {
+      currentRole = 'ADMIN';
+    }
+  });
+
+  it('creates and revokes an admin session through browser redirects', async () => {
+    const adminAgent = request.agent(app.getHttpServer());
+    const loginResponse = await adminAgent
+      .post('/auth/login/admin')
+      .type('form')
+      .send({
+        email: activeUser.email,
+        password: 'correct-password',
+      })
+      .expect(303);
+
+    expect(loginResponse.headers['location']).toBe(
+      'http://localhost:3000/admin',
+    );
+    expect(loginResponse.headers['set-cookie']).toEqual(expect.any(Array));
+
+    const logoutResponse = await adminAgent
+      .post('/auth/logout/admin')
+      .expect(303);
+
+    expect(logoutResponse.headers['location']).toBe(
+      'http://localhost:3000/admin/login',
+    );
+    expect(logoutResponse.headers['set-cookie']).toEqual(expect.any(Array));
+    expect(persistedSession?.status).toBe('REVOKED');
+  });
+
   it('rejects /userinfo without a Bearer access token', () => {
     return request(app.getHttpServer()).get('/userinfo').expect(401).expect({
       error: 'invalid_token',

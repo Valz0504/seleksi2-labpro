@@ -84,6 +84,14 @@ export function validateEnvironment(
   const databaseUrl = requireString(environment, 'DATABASE_URL');
   const cookieSecret = requireString(environment, 'SSO_COOKIE_SECRET');
   const authLoginUrl = requireHttpUrl(environment, 'AUTH_LOGIN_URL');
+  const controlPanelAdminLoginUrl = requireHttpUrl(
+    environment,
+    'CONTROL_PANEL_ADMIN_LOGIN_URL',
+  );
+  const controlPanelAdminDashboardUrl = requireHttpUrl(
+    environment,
+    'CONTROL_PANEL_ADMIN_DASHBOARD_URL',
+  );
   const cookieName =
     typeof environment['SSO_COOKIE_NAME'] === 'string' &&
     environment['SSO_COOKIE_NAME'].length > 0
@@ -104,6 +112,8 @@ export function validateEnvironment(
     ...environment,
     DATABASE_URL: databaseUrl,
     AUTH_LOGIN_URL: authLoginUrl,
+    CONTROL_PANEL_ADMIN_LOGIN_URL: controlPanelAdminLoginUrl,
+    CONTROL_PANEL_ADMIN_DASHBOARD_URL: controlPanelAdminDashboardUrl,
     SSO_COOKIE_SECRET: cookieSecret,
     SSO_COOKIE_NAME: cookieName,
     SSO_COOKIE_SECURE: parseBoolean(
