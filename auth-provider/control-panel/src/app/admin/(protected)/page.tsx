@@ -52,6 +52,7 @@ export default async function AdminDashboardPage() {
           label="Group"
           value={overview.groups}
           description="Group yang dapat dihubungkan dengan user dan policy."
+          href="/admin/groups"
         />
         <SummaryCard
           label="Application"

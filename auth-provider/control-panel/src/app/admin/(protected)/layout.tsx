@@ -70,6 +70,12 @@ export default async function ProtectedAdminLayout({ children }: ProtectedAdminL
           >
             Pengguna
           </Link>
+          <Link
+            className="border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-slate-600 transition hover:border-blue-200 hover:text-blue-700"
+            href="/admin/groups"
+          >
+            Group
+          </Link>
         </nav>
       </header>
 
