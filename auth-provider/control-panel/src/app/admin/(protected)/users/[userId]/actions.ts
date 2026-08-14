@@ -260,12 +260,12 @@ function membershipErrorMessage(code: string | null, operation: 'add' | 'remove'
     return 'Pengguna sudah menjadi anggota group tersebut.';
   }
   if (code === 'MEMBERSHIP_NOT_FOUND') {
-    return 'Membership tidak lagi ditemukan. Muat ulang halaman untuk melihat data terbaru.';
+    return 'Keanggotaan group tidak lagi ditemukan. Muat ulang halaman untuk melihat data terbaru.';
   }
 
   return operation === 'add'
     ? 'Group belum dapat ditambahkan. Silakan coba lagi.'
-    : 'Membership belum dapat dihapus. Silakan coba lagi.';
+    : 'User belum dapat dikeluarkan dari group. Silakan coba lagi.';
 }
 
 export async function addUserGroupAction(

@@ -141,7 +141,8 @@ export default async function AdminUserDetailPage({
           className="mt-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-semibold leading-6 text-green-900"
           role="status"
         >
-          Membership berhasil ditambahkan. Policy group berlaku pada authorization user berikutnya.
+          User berhasil dimasukkan ke group. Policy group berlaku pada authorization user
+          berikutnya.
         </div>
       ) : null}
 
@@ -150,8 +151,8 @@ export default async function AdminUserDetailPage({
           className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold leading-6 text-amber-950"
           role="status"
         >
-          Membership berhasil dihapus. Policy telah dievaluasi ulang; apabila jalur ALLOW terakhir
-          hilang, seluruh central session dan access token aktif user telah dicabut.
+          User berhasil dikeluarkan dari group. Policy telah dievaluasi ulang; apabila jalur ALLOW
+          terakhir hilang, seluruh central session dan access token aktif user telah dicabut.
         </div>
       ) : null}
 
@@ -195,11 +196,11 @@ export default async function AdminUserDetailPage({
 
       <section className="mt-8">
         <p className="text-sm font-semibold text-blue-600">Kontrol akses</p>
-        <h3 className="mt-1 text-2xl font-bold tracking-tight text-slate-950">Membership group</h3>
+        <h3 className="mt-1 text-2xl font-bold tracking-tight text-slate-950">Keanggotaan group</h3>
         <p className="mt-2 max-w-3xl leading-7 text-slate-600">
-          Group menghubungkan user dengan policy ALLOW milik aplikasi. Penghapusan membership hanya
-          mencabut session dan token jika user tidak lagi memiliki jalur ALLOW lain ke aplikasi yang
-          terdampak.
+          Group menghubungkan user dengan policy ALLOW milik aplikasi. Mengeluarkan user dari group
+          hanya mencabut session dan token jika user tidak lagi memiliki jalur ALLOW lain ke
+          aplikasi yang terdampak.
         </p>
         <div className="mt-6">
           <UserMembershipManager userId={user.id} memberships={user.userGroups} groups={groups} />

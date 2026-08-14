@@ -52,7 +52,7 @@ function RemoveMembershipForm({ userId, groupId, groupName }: RemoveMembershipFo
         type="submit"
         disabled={isPending}
       >
-        {isPending ? 'Menghapus…' : 'Hapus membership'}
+        {isPending ? 'Mengeluarkan…' : 'Keluarkan dari group'}
       </button>
     </form>
   );
@@ -126,7 +126,7 @@ export function UserMembershipManager({ userId, memberships, groups }: UserMembe
       </div>
 
       <aside className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h4 className="font-bold text-slate-950">Tambahkan group</h4>
+        <h4 className="font-bold text-slate-950">Tambahkan ke group</h4>
         <p className="mt-2 text-sm leading-6 text-slate-500">
           Policy group akan dievaluasi saat user memulai authorization berikutnya.
         </p>
@@ -175,7 +175,7 @@ export function UserMembershipManager({ userId, memberships, groups }: UserMembe
               type="submit"
               disabled={availableGroups.length === 0 || isAdding}
             >
-              {isAdding ? 'Menambahkan…' : 'Tambahkan membership'}
+              {isAdding ? 'Menambahkan…' : 'Tambahkan ke group'}
             </button>
           </form>
         )}
