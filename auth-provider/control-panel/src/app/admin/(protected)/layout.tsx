@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentAdminSession } from '@/lib/admin-session';
 import { buildPublicAuthServerUrl } from '@/lib/auth-server-url';
@@ -52,6 +53,24 @@ export default async function ProtectedAdminLayout({ children }: ProtectedAdminL
             </form>
           </div>
         </div>
+
+        <nav
+          className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-6"
+          aria-label="Navigasi Control Panel"
+        >
+          <Link
+            className="border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-slate-600 transition hover:border-blue-200 hover:text-blue-700"
+            href="/admin"
+          >
+            Dashboard
+          </Link>
+          <Link
+            className="border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-slate-600 transition hover:border-blue-200 hover:text-blue-700"
+            href="/admin/users"
+          >
+            Pengguna
+          </Link>
+        </nav>
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>

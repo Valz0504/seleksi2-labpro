@@ -23,6 +23,25 @@ export interface AdminOverview {
   applications: number | null;
 }
 
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  role: 'ADMIN' | 'USER';
+  createdAt: string;
+  updatedAt: string;
+  userGroups: Array<{
+    id: string;
+    createdAt: string;
+    group: {
+      id: string;
+      name: string;
+      description: string | null;
+    };
+  }>;
+}
+
 async function getCookieHeader(): Promise<string> {
   return (await cookies()).toString();
 }
@@ -53,6 +72,25 @@ export async function getAdminOverview(): Promise<AdminOverview> {
   ]);
 
   return { users, groups, applications };
+}
+
+export async function getAdminUsers(): Promise<AdminUser[] | null> {
+  try {
+    const response = await fetch(buildInternalAuthServerUrl('/admin/users'), {
+      headers: { cookie: await getCookieHeader() },
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const body = (await response.json()) as unknown;
+
+    return Array.isArray(body) ? (body as AdminUser[]) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function getCollectionCount(path: string, cookieHeader: string): Promise<number | null> {
