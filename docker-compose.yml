@@ -92,6 +92,7 @@ services:
     environment:
       PORT: 3001
       DATABASE_URL: postgresql://${PRIMARY_DB_USER}:${PRIMARY_DB_PASSWORD}@primary-db:5432/${PRIMARY_DB_NAME}
+      AUTH_LOGIN_URL: ${AUTH_LOGIN_URL}
       SSO_COOKIE_SECRET: ${SSO_COOKIE_SECRET}
       SSO_COOKIE_NAME: ${SSO_COOKIE_NAME}
       SSO_COOKIE_SECURE: ${SSO_COOKIE_SECURE}
@@ -141,6 +142,7 @@ services:
     environment:
       PORT: 3000
       AUTH_SERVER_INTERNAL_URL: http://auth-server:3001
+      AUTH_SERVER_PUBLIC_URL: ${AUTH_SERVER_PUBLIC_URL}
     depends_on:
       auth-server:
         condition: service_healthy
