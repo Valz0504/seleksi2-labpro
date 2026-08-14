@@ -3,6 +3,30 @@ const DEFAULT_SSO_SESSION_TTL_SECONDS = 8 * 60 * 60;
 const DEFAULT_AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
 const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 
+function requireHttpUrl(
+  environment: Record<string, unknown>,
+  name: string,
+): string {
+  const value = requireString(environment, name);
+
+  try {
+    const url = new URL(value);
+
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+      url.username !== '' ||
+      url.password !== '' ||
+      url.hash !== ''
+    ) {
+      throw new Error();
+    }
+
+    return url.toString();
+  } catch {
+    throw new Error(`${name} must be a valid HTTP(S) URL`);
+  }
+}
+
 function requireString(
   environment: Record<string, unknown>,
   name: string,
@@ -59,6 +83,7 @@ export function validateEnvironment(
 ): Record<string, unknown> {
   const databaseUrl = requireString(environment, 'DATABASE_URL');
   const cookieSecret = requireString(environment, 'SSO_COOKIE_SECRET');
+  const authLoginUrl = requireHttpUrl(environment, 'AUTH_LOGIN_URL');
   const cookieName =
     typeof environment['SSO_COOKIE_NAME'] === 'string' &&
     environment['SSO_COOKIE_NAME'].length > 0
@@ -78,6 +103,7 @@ export function validateEnvironment(
   return {
     ...environment,
     DATABASE_URL: databaseUrl,
+    AUTH_LOGIN_URL: authLoginUrl,
     SSO_COOKIE_SECRET: cookieSecret,
     SSO_COOKIE_NAME: cookieName,
     SSO_COOKIE_SECURE: parseBoolean(

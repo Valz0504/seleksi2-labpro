@@ -469,7 +469,7 @@ describe('AppController (e2e)', () => {
       });
   });
 
-  it('returns login_required to a registered URI without a central session', async () => {
+  it('sends a trusted authorization request to the login page without a central session', async () => {
     const response = await request(app.getHttpServer())
       .get('/authorize')
       .query({
@@ -481,12 +481,111 @@ describe('AppController (e2e)', () => {
         code_challenge_method: 'S256',
       })
       .expect(302);
-    const callbackUrl = new URL(response.headers['location']);
+    const loginPageUrl = new URL(response.headers['location']);
+    const returnTo = loginPageUrl.searchParams.get('return_to');
+
+    expect(loginPageUrl.origin + loginPageUrl.pathname).toBe(
+      'http://localhost:3000/login',
+    );
+    expect(returnTo).toEqual(expect.any(String));
+
+    const resumedAuthorizationUrl = new URL(
+      returnTo as string,
+      'http://auth-server.internal',
+    );
+
+    expect(resumedAuthorizationUrl.pathname).toBe('/authorize');
+    expect(resumedAuthorizationUrl.searchParams.get('client_id')).toBe('app-a');
+    expect(resumedAuthorizationUrl.searchParams.get('redirect_uri')).toBe(
+      applicationRedirectUri,
+    );
+    expect(resumedAuthorizationUrl.searchParams.get('state')).toBe(validState);
+    expect(resumedAuthorizationUrl.searchParams.get('code_challenge')).toBe(
+      validCodeChallenge,
+    );
+  });
+
+  it('rejects an unsafe browser login continuation before checking credentials', () => {
+    return request(app.getHttpServer())
+      .post('/auth/login/continue')
+      .type('form')
+      .send({
+        email: activeUser.email,
+        password: 'correct-password',
+        returnTo: 'https://attacker.example/authorize',
+      })
+      .expect(400)
+      .expect({
+        error: {
+          code: 'INVALID_LOGIN_CONTINUATION',
+          message: 'Tujuan lanjutan login tidak valid',
+        },
+      });
+  });
+
+  it('returns failed browser login to the UI with a generic error', async () => {
+    const returnTo = `/authorize?${new URLSearchParams({
+      client_id: 'app-a',
+      redirect_uri: applicationRedirectUri,
+      response_type: 'code',
+      state: validState,
+      code_challenge: validCodeChallenge,
+      code_challenge_method: 'S256',
+    }).toString()}`;
+    const response = await request(app.getHttpServer())
+      .post('/auth/login/continue')
+      .type('form')
+      .send({
+        email: activeUser.email,
+        password: 'wrong-password',
+        returnTo,
+      })
+      .expect(303);
+    const loginPageUrl = new URL(response.headers['location']);
+
+    expect(loginPageUrl.origin + loginPageUrl.pathname).toBe(
+      'http://localhost:3000/login',
+    );
+    expect(loginPageUrl.searchParams.get('return_to')).toBe(returnTo);
+    expect(loginPageUrl.searchParams.get('error')).toBe('invalid_credentials');
+    expect(response.headers['location']).not.toContain('wrong-password');
+  });
+
+  it('creates a central session and resumes /authorize after browser login', async () => {
+    const browserAgent = request.agent(app.getHttpServer());
+    const returnTo = `/authorize?${new URLSearchParams({
+      client_id: 'app-a',
+      redirect_uri: applicationRedirectUri,
+      response_type: 'code',
+      state: validState,
+      code_challenge: validCodeChallenge,
+      code_challenge_method: 'S256',
+    }).toString()}`;
+    const loginResponse = await browserAgent
+      .post('/auth/login/continue')
+      .type('form')
+      .send({
+        email: activeUser.email,
+        password: 'correct-password',
+        returnTo,
+      })
+      .expect(303);
+    const rawSetCookieHeader = loginResponse.headers['set-cookie'] as unknown;
+    const setCookieHeader = Array.isArray(rawSetCookieHeader)
+      ? (rawSetCookieHeader[0] as unknown)
+      : rawSetCookieHeader;
+
+    expect(loginResponse.headers['location']).toBe(returnTo);
+    expect(setCookieHeader).toEqual(expect.any(String));
+    expect(setCookieHeader).toContain('HttpOnly');
+
+    const authorizationResponse = await browserAgent.get(returnTo).expect(302);
+    const callbackUrl = new URL(authorizationResponse.headers['location']);
 
     expect(callbackUrl.origin + callbackUrl.pathname).toBe(
       applicationRedirectUri,
     );
-    expect(callbackUrl.searchParams.get('error')).toBe('login_required');
+    expect(callbackUrl.searchParams.get('code')).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(callbackUrl.searchParams.get('state')).toBe(validState);
   });
 

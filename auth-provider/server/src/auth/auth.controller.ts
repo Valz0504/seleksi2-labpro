@@ -11,13 +11,16 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
+import { BrowserLoginDto } from './dto/browser-login.dto';
 import { LoginDto } from './dto/login.dto';
+import { FrontChannelLoginService } from './front-channel-login.service';
 import { SessionCookieService } from './session-cookie.service';
 
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly frontChannelLoginService: FrontChannelLoginService,
     private readonly sessionCookieService: SessionCookieService,
   ) {}
 
@@ -43,6 +46,43 @@ export class AuthController {
       user: result.user,
       session: result.session,
     };
+  }
+
+  @Post('login/continue')
+  async continueLogin(
+    @Body() browserLoginDto: BrowserLoginDto,
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    const returnTo = this.frontChannelLoginService.requireSafeReturnTo(
+      browserLoginDto.returnTo,
+    );
+
+    try {
+      const result = await this.authService.login(
+        browserLoginDto.email,
+        browserLoginDto.password,
+        {
+          ipAddress: request.ip?.slice(0, 45),
+          userAgent: request.get('user-agent'),
+        },
+      );
+
+      this.sessionCookieService.write(response, result.sessionToken);
+      response.redirect(HttpStatus.SEE_OTHER, returnTo);
+    } catch (error: unknown) {
+      if (!(error instanceof UnauthorizedException)) {
+        throw error;
+      }
+
+      response.redirect(
+        HttpStatus.SEE_OTHER,
+        this.frontChannelLoginService.buildLoginPageUrl(
+          returnTo,
+          'invalid_credentials',
+        ),
+      );
+    }
   }
 
   @Get('session')

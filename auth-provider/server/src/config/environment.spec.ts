@@ -4,6 +4,7 @@ describe('validateEnvironment', () => {
   const validEnvironment = {
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/auth_provider',
     SSO_COOKIE_SECRET: 'a-secure-cookie-secret-with-at-least-32-characters',
+    AUTH_LOGIN_URL: 'http://localhost:3000/login',
   };
 
   it('applies safe development defaults for session and OAuth lifetimes', () => {
@@ -38,5 +39,20 @@ describe('validateEnvironment', () => {
         SSO_COOKIE_SECURE: 'yes',
       }),
     ).toThrow('SSO_COOKIE_SECURE must be either true or false');
+  });
+
+  it('rejects an invalid or credential-bearing login page URL', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        AUTH_LOGIN_URL: 'javascript:alert(1)',
+      }),
+    ).toThrow('AUTH_LOGIN_URL must be a valid HTTP(S) URL');
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        AUTH_LOGIN_URL: 'https://user:password@example.com/login',
+      }),
+    ).toThrow('AUTH_LOGIN_URL must be a valid HTTP(S) URL');
   });
 });

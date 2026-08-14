@@ -1,5 +1,6 @@
 import { Controller, Get, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { FrontChannelLoginService } from '../auth/front-channel-login.service';
 import { SessionCookieService } from '../auth/session-cookie.service';
 import { AuthorizationRequestError } from './authorization-request.error';
 import { AuthorizationService } from './authorization.service';
@@ -8,6 +9,7 @@ import { AuthorizationService } from './authorization.service';
 export class AuthorizationController {
   constructor(
     private readonly authorizationService: AuthorizationService,
+    private readonly frontChannelLoginService: FrontChannelLoginService,
     private readonly sessionCookieService: SessionCookieService,
   ) {}
 
@@ -35,6 +37,13 @@ export class AuthorizationController {
     } catch (error: unknown) {
       if (!(error instanceof AuthorizationRequestError)) {
         throw error;
+      }
+
+      if (error.code === 'login_required') {
+        response.redirect(
+          this.frontChannelLoginService.buildLoginPageUrl(request.originalUrl),
+        );
+        return;
       }
 
       const errorRedirectUrl = error.redirectUrl;

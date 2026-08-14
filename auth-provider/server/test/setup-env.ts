@@ -2,6 +2,7 @@ process.env.DATABASE_URL =
   'postgresql://postgres:postgres@localhost:5432/auth_provider_test';
 process.env.SSO_COOKIE_SECRET =
   'e2e-only-cookie-signing-secret-with-32-characters';
+process.env.AUTH_LOGIN_URL = 'http://localhost:3000/login';
 process.env.SSO_COOKIE_NAME = 'sso_session';
 process.env.SSO_COOKIE_SECURE = 'false';
 process.env.SSO_SESSION_TTL_SECONDS = '3600';
