@@ -3,6 +3,7 @@ import { buildPublicAuthServerUrl } from '@/lib/auth-server-url';
 interface AdminLoginPageProps {
   searchParams: Promise<{
     error?: string | string[];
+    notice?: string | string[];
   }>;
 }
 
@@ -11,7 +12,9 @@ function readSingle(value: string | string[] | undefined): string | undefined {
 }
 
 export default async function AdminLoginPage({ searchParams }: AdminLoginPageProps) {
-  const error = readSingle((await searchParams).error);
+  const query = await searchParams;
+  const error = readSingle(query.error);
+  const notice = readSingle(query.notice);
   const errorMessage =
     error === 'admin_required'
       ? 'Central session aktif, tetapi akun ini bukan administrator.'
@@ -20,6 +23,10 @@ export default async function AdminLoginPage({ searchParams }: AdminLoginPagePro
         : error === 'invalid_credentials'
           ? 'Email atau password tidak valid.'
           : null;
+  const noticeMessage =
+    notice === 'password_changed'
+      ? 'Password berhasil diubah. Seluruh session dan token akun telah dicabut; silakan login kembali.'
+      : null;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
@@ -34,6 +41,15 @@ export default async function AdminLoginPage({ searchParams }: AdminLoginPagePro
           Gunakan akun administrator Auth Provider untuk mengelola user, group, aplikasi, dan
           policy.
         </p>
+
+        {noticeMessage ? (
+          <div
+            className="mt-5 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm leading-6 text-green-900"
+            role="status"
+          >
+            {noticeMessage}
+          </div>
+        ) : null}
 
         {errorMessage ? (
           <div

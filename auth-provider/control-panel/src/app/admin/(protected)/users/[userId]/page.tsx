@@ -1,11 +1,21 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getAdminUser, type AdminUser } from '@/lib/admin-session';
+import { getAdminUser, getCurrentAdminSession, type AdminUser } from '@/lib/admin-session';
+import { UpdatePasswordForm } from './update-password-form';
 import { UpdateUserForm } from './update-user-form';
+import { UserStatusForm } from './user-status-form';
 
 interface AdminUserDetailPageProps {
   params: Promise<{ userId: string }>;
-  searchParams: Promise<{ updated?: string | string[] }>;
+  searchParams: Promise<{
+    updated?: string | string[];
+    status?: string | string[];
+    password?: string | string[];
+  }>;
+}
+
+function readSingle(value: string | string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 function formatDate(value: string): string {
@@ -33,7 +43,10 @@ export default async function AdminUserDetailPage({
   searchParams,
 }: AdminUserDetailPageProps) {
   const [{ userId }, query] = await Promise.all([params, searchParams]);
-  const result = await getAdminUser(userId);
+  const [result, currentSession] = await Promise.all([
+    getAdminUser(userId),
+    getCurrentAdminSession(),
+  ]);
 
   if (result.status === 'not_found') {
     notFound();
@@ -57,6 +70,9 @@ export default async function AdminUserDetailPage({
 
   const { user } = result;
   const wasUpdated = query.updated === '1';
+  const statusResult = readSingle(query.status);
+  const passwordResult = readSingle(query.password);
+  const isCurrentUser = currentSession?.user.id === user.id;
 
   return (
     <>
@@ -79,6 +95,35 @@ export default async function AdminUserDetailPage({
           role="status"
         >
           Profil pengguna berhasil diperbarui.
+        </div>
+      ) : null}
+
+      {statusResult === 'deactivated' ? (
+        <div
+          className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold leading-6 text-amber-950"
+          role="status"
+        >
+          Pengguna dinonaktifkan. Seluruh central session dan access token aktifnya telah dicabut.
+        </div>
+      ) : null}
+
+      {statusResult === 'activated' ? (
+        <div
+          className="mt-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-semibold leading-6 text-green-900"
+          role="status"
+        >
+          Pengguna diaktifkan kembali. Session dan token lama tetap tidak berlaku; pengguna harus
+          login lagi.
+        </div>
+      ) : null}
+
+      {passwordResult === 'changed' ? (
+        <div
+          className="mt-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-semibold leading-6 text-green-900"
+          role="status"
+        >
+          Password berhasil diubah. Seluruh central session dan access token aktif pengguna telah
+          dicabut.
         </div>
       ) : null}
 
@@ -140,6 +185,42 @@ export default async function AdminUserDetailPage({
           </section>
         </aside>
       </div>
+
+      <section className="mt-8">
+        <p className="text-sm font-semibold text-blue-600">Keamanan akun</p>
+        <h3 className="mt-1 text-2xl font-bold tracking-tight text-slate-950">
+          Status dan credential
+        </h3>
+        <p className="mt-2 max-w-3xl leading-7 text-slate-600">
+          Kedua perubahan berikut memengaruhi kemampuan user untuk memakai central session dan
+          access token yang sudah diterbitkan.
+        </p>
+
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h4 className="text-xl font-bold text-slate-950">Status pengguna</h4>
+              <StatusBadge status={user.status} />
+            </div>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              Kendalikan apakah user boleh login dan memperoleh akses baru.
+            </p>
+            <div className="mt-6">
+              <UserStatusForm userId={user.id} status={user.status} isCurrentUser={isCurrentUser} />
+            </div>
+          </article>
+
+          <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+            <h4 className="text-xl font-bold text-slate-950">Ganti password</h4>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              Tetapkan password awal baru tanpa pernah membaca password lama dari database.
+            </p>
+            <div className="mt-6">
+              <UpdatePasswordForm userId={user.id} isCurrentUser={isCurrentUser} />
+            </div>
+          </article>
+        </div>
+      </section>
     </>
   );
 }

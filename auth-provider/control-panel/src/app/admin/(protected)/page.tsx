@@ -59,14 +59,6 @@ export default async function AdminDashboardPage() {
           description="OAuth client yang terdaftar pada Auth Provider."
         />
       </section>
-
-      <section className="mt-8 rounded-xl border border-blue-200 bg-blue-50 p-6">
-        <h3 className="font-bold text-blue-950">Fondasi admin sudah aktif</h3>
-        <p className="mt-2 leading-7 text-blue-900/80">
-          Tahap berikutnya akan menambahkan halaman pengelolaan user, group, application, redirect
-          URI, dan policy di atas proteksi route ini.
-        </p>
-      </section>
     </>
   );
 }
