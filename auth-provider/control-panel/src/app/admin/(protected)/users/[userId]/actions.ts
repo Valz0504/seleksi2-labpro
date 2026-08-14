@@ -23,6 +23,10 @@ export interface UpdateUserPasswordActionState {
   fieldErrors: Partial<Record<PasswordField, string>>;
 }
 
+export interface UserMembershipActionState {
+  error: string | null;
+}
+
 function readString(formData: FormData, name: UserProfileField): string {
   const value = formData.get(name);
 
@@ -243,4 +247,111 @@ export async function updateUserPasswordAction(
   }
 
   redirect(`/admin/users/${encodeURIComponent(userId)}?password=changed`);
+}
+
+function membershipErrorMessage(code: string | null, operation: 'add' | 'remove'): string {
+  if (code === 'USER_NOT_FOUND') {
+    return 'Pengguna tidak lagi ditemukan.';
+  }
+  if (code === 'GROUP_NOT_FOUND') {
+    return 'Group tidak lagi ditemukan.';
+  }
+  if (code === 'MEMBERSHIP_ALREADY_EXISTS') {
+    return 'Pengguna sudah menjadi anggota group tersebut.';
+  }
+  if (code === 'MEMBERSHIP_NOT_FOUND') {
+    return 'Membership tidak lagi ditemukan. Muat ulang halaman untuk melihat data terbaru.';
+  }
+
+  return operation === 'add'
+    ? 'Group belum dapat ditambahkan. Silakan coba lagi.'
+    : 'Membership belum dapat dihapus. Silakan coba lagi.';
+}
+
+export async function addUserGroupAction(
+  userId: string,
+  previousState: UserMembershipActionState,
+  formData: FormData,
+): Promise<UserMembershipActionState> {
+  void previousState;
+
+  const groupValue = formData.get('groupId');
+  const groupId = typeof groupValue === 'string' ? groupValue.trim() : '';
+
+  if (!groupId) {
+    return { error: 'Pilih group yang ingin ditambahkan.' };
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetchAdminApi(
+      `/admin/users/${encodeURIComponent(userId)}/groups/${encodeURIComponent(groupId)}`,
+      { method: 'POST' },
+    );
+  } catch {
+    return { error: 'Auth Server tidak dapat dihubungi. Coba lagi setelah service aktif.' };
+  }
+
+  if (response.status === 401) {
+    redirect('/admin/login?error=session_required');
+  }
+  if (response.status === 403) {
+    redirect('/admin/login?error=admin_required');
+  }
+
+  if (!response.ok) {
+    return { error: membershipErrorMessage(await readAdminErrorCode(response), 'add') };
+  }
+
+  revalidatePath('/admin/users');
+  revalidatePath(`/admin/users/${userId}`);
+  redirect(`/admin/users/${encodeURIComponent(userId)}?membership=added`);
+}
+
+export async function removeUserGroupAction(
+  userId: string,
+  groupId: string,
+  previousState: UserMembershipActionState,
+  formData: FormData,
+): Promise<UserMembershipActionState> {
+  void previousState;
+  void formData;
+
+  const currentSession = await getCurrentAdminSession();
+
+  if (!currentSession) {
+    redirect('/admin/login?error=session_required');
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetchAdminApi(
+      `/admin/users/${encodeURIComponent(userId)}/groups/${encodeURIComponent(groupId)}`,
+      { method: 'DELETE' },
+    );
+  } catch {
+    return { error: 'Auth Server tidak dapat dihubungi. Coba lagi setelah service aktif.' };
+  }
+
+  if (response.status === 401) {
+    redirect('/admin/login?error=session_required');
+  }
+  if (response.status === 403) {
+    redirect('/admin/login?error=admin_required');
+  }
+
+  if (!response.ok) {
+    return { error: membershipErrorMessage(await readAdminErrorCode(response), 'remove') };
+  }
+
+  revalidatePath('/admin/users');
+  revalidatePath(`/admin/users/${userId}`);
+
+  if (currentSession.user.id === userId && !(await getCurrentAdminSession())) {
+    redirect('/admin/login?notice=membership_changed');
+  }
+
+  redirect(`/admin/users/${encodeURIComponent(userId)}?membership=removed`);
 }

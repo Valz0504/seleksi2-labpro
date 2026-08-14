@@ -1,8 +1,14 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getAdminUser, getCurrentAdminSession, type AdminUser } from '@/lib/admin-session';
+import {
+  getAdminGroups,
+  getAdminUser,
+  getCurrentAdminSession,
+  type AdminUser,
+} from '@/lib/admin-session';
 import { UpdatePasswordForm } from './update-password-form';
 import { UpdateUserForm } from './update-user-form';
+import { UserMembershipManager } from './user-membership-manager';
 import { UserStatusForm } from './user-status-form';
 
 interface AdminUserDetailPageProps {
@@ -11,6 +17,7 @@ interface AdminUserDetailPageProps {
     updated?: string | string[];
     status?: string | string[];
     password?: string | string[];
+    membership?: string | string[];
   }>;
 }
 
@@ -43,9 +50,10 @@ export default async function AdminUserDetailPage({
   searchParams,
 }: AdminUserDetailPageProps) {
   const [{ userId }, query] = await Promise.all([params, searchParams]);
-  const [result, currentSession] = await Promise.all([
+  const [result, currentSession, groups] = await Promise.all([
     getAdminUser(userId),
     getCurrentAdminSession(),
+    getAdminGroups(),
   ]);
 
   if (result.status === 'not_found') {
@@ -72,6 +80,7 @@ export default async function AdminUserDetailPage({
   const wasUpdated = query.updated === '1';
   const statusResult = readSingle(query.status);
   const passwordResult = readSingle(query.password);
+  const membershipResult = readSingle(query.membership);
   const isCurrentUser = currentSession?.user.id === user.id;
 
   return (
@@ -127,6 +136,25 @@ export default async function AdminUserDetailPage({
         </div>
       ) : null}
 
+      {membershipResult === 'added' ? (
+        <div
+          className="mt-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-semibold leading-6 text-green-900"
+          role="status"
+        >
+          Membership berhasil ditambahkan. Policy group berlaku pada authorization user berikutnya.
+        </div>
+      ) : null}
+
+      {membershipResult === 'removed' ? (
+        <div
+          className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold leading-6 text-amber-950"
+          role="status"
+        >
+          Membership berhasil dihapus. Policy telah dievaluasi ulang; apabila jalur ALLOW terakhir
+          hilang, seluruh central session dan access token aktif user telah dicabut.
+        </div>
+      ) : null}
+
       <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(18rem,1fr)]">
         <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
           <h3 className="text-xl font-bold text-slate-950">Edit profil</h3>
@@ -162,29 +190,21 @@ export default async function AdminUserDetailPage({
               </div>
             </dl>
           </section>
-
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="font-bold text-slate-950">Keanggotaan group</h3>
-            {user.userGroups.length > 0 ? (
-              <ul className="mt-4 flex flex-wrap gap-2">
-                {user.userGroups.map(({ id, group }) => (
-                  <li
-                    className="rounded-md bg-blue-50 px-2.5 py-1.5 text-sm font-semibold text-blue-800"
-                    key={id}
-                    title={group.description ?? undefined}
-                  >
-                    {group.name}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-3 text-sm leading-6 text-slate-500">
-                User belum menjadi anggota group mana pun.
-              </p>
-            )}
-          </section>
         </aside>
       </div>
+
+      <section className="mt-8">
+        <p className="text-sm font-semibold text-blue-600">Kontrol akses</p>
+        <h3 className="mt-1 text-2xl font-bold tracking-tight text-slate-950">Membership group</h3>
+        <p className="mt-2 max-w-3xl leading-7 text-slate-600">
+          Group menghubungkan user dengan policy ALLOW milik aplikasi. Penghapusan membership hanya
+          mencabut session dan token jika user tidak lagi memiliki jalur ALLOW lain ke aplikasi yang
+          terdampak.
+        </p>
+        <div className="mt-6">
+          <UserMembershipManager userId={user.id} memberships={user.userGroups} groups={groups} />
+        </div>
+      </section>
 
       <section className="mt-8">
         <p className="text-sm font-semibold text-blue-600">Keamanan akun</p>

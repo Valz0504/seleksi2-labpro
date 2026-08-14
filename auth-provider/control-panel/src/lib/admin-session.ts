@@ -43,6 +43,35 @@ export interface AdminUser {
   }>;
 }
 
+export interface AdminGroup {
+  id: string;
+  name: string;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+  userGroups: Array<{
+    id: string;
+    createdAt: string;
+    user: {
+      id: string;
+      name: string;
+      email: string;
+      status: 'ACTIVE' | 'INACTIVE';
+    };
+  }>;
+  policies: Array<{
+    id: string;
+    effect: 'ALLOW';
+    createdAt: string;
+    application: {
+      id: string;
+      name: string;
+      clientId: string;
+      status: 'ACTIVE' | 'INACTIVE';
+    };
+  }>;
+}
+
 export type AdminUserLookup =
   { status: 'success'; user: AdminUser } | { status: 'not_found' } | { status: 'error' };
 
@@ -88,6 +117,22 @@ export async function getAdminUsers(): Promise<AdminUser[] | null> {
     const body = (await response.json()) as unknown;
 
     return Array.isArray(body) ? (body as AdminUser[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getAdminGroups(): Promise<AdminGroup[] | null> {
+  try {
+    const response = await fetchAdminApi('/admin/groups');
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const body = (await response.json()) as unknown;
+
+    return Array.isArray(body) ? (body as AdminGroup[]) : null;
   } catch {
     return null;
   }

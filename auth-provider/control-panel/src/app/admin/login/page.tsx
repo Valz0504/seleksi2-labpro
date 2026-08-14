@@ -26,7 +26,9 @@ export default async function AdminLoginPage({ searchParams }: AdminLoginPagePro
   const noticeMessage =
     notice === 'password_changed'
       ? 'Password berhasil diubah. Seluruh session dan token akun telah dicabut; silakan login kembali.'
-      : null;
+      : notice === 'membership_changed'
+        ? 'Membership berhasil dihapus dan jalur ALLOW terakhir ke aplikasi terdampak hilang. Seluruh session dan token telah dicabut; silakan login kembali.'
+        : null;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
