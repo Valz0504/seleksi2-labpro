@@ -58,6 +58,7 @@ export default async function AdminDashboardPage() {
           label="Application"
           value={overview.applications}
           description="OAuth client yang terdaftar pada Auth Provider."
+          href="/admin/applications"
         />
       </section>
     </>

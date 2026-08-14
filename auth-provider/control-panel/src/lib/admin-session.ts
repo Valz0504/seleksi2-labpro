@@ -72,6 +72,32 @@ export interface AdminGroup {
   }>;
 }
 
+export interface AdminApplication {
+  id: string;
+  name: string;
+  clientId: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  launchUrl: string | null;
+  logoutNotificationUrl: string;
+  createdAt: string;
+  updatedAt: string;
+  redirectUris: Array<{
+    id: string;
+    redirectUri: string;
+    createdAt: string;
+  }>;
+  groupPolicies: Array<{
+    id: string;
+    effect: 'ALLOW';
+    createdAt: string;
+    group: {
+      id: string;
+      name: string;
+      description: string | null;
+    };
+  }>;
+}
+
 export type AdminUserLookup =
   { status: 'success'; user: AdminUser } | { status: 'not_found' } | { status: 'error' };
 
@@ -136,6 +162,22 @@ export async function getAdminGroups(): Promise<AdminGroup[] | null> {
     const body = (await response.json()) as unknown;
 
     return Array.isArray(body) ? (body as AdminGroup[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getAdminApplications(): Promise<AdminApplication[] | null> {
+  try {
+    const response = await fetchAdminApi('/admin/applications');
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const body = (await response.json()) as unknown;
+
+    return Array.isArray(body) ? (body as AdminApplication[]) : null;
   } catch {
     return null;
   }
