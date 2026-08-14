@@ -27,8 +27,10 @@ export default async function AdminLoginPage({ searchParams }: AdminLoginPagePro
     notice === 'password_changed'
       ? 'Password berhasil diubah. Seluruh session dan token akun telah dicabut; silakan login kembali.'
       : notice === 'membership_changed'
-        ? 'Membership berhasil dihapus dan jalur ALLOW terakhir ke aplikasi terdampak hilang. Seluruh session dan token telah dicabut; silakan login kembali.'
-        : null;
+        ? 'Keanggotaan group berhasil dihapus dan jalur ALLOW terakhir ke aplikasi terdampak hilang. Seluruh session dan token telah dicabut; silakan login kembali.'
+        : notice === 'group_deleted'
+          ? 'Group berhasil dihapus dan jalur ALLOW terakhir akun ke aplikasi terdampak hilang. Seluruh session dan token telah dicabut; silakan login kembali.'
+          : null;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">

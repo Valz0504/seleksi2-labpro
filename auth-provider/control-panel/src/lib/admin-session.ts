@@ -75,6 +75,9 @@ export interface AdminGroup {
 export type AdminUserLookup =
   { status: 'success'; user: AdminUser } | { status: 'not_found' } | { status: 'error' };
 
+export type AdminGroupLookup =
+  { status: 'success'; group: AdminGroup } | { status: 'not_found' } | { status: 'error' };
+
 async function getCookieHeader(): Promise<string> {
   return (await cookies()).toString();
 }
@@ -135,6 +138,30 @@ export async function getAdminGroups(): Promise<AdminGroup[] | null> {
     return Array.isArray(body) ? (body as AdminGroup[]) : null;
   } catch {
     return null;
+  }
+}
+
+export async function getAdminGroup(groupId: string): Promise<AdminGroupLookup> {
+  try {
+    const response = await fetchAdminApi(`/admin/groups/${encodeURIComponent(groupId)}`);
+
+    if (response.status === 404) {
+      return { status: 'not_found' };
+    }
+
+    if (!response.ok) {
+      return { status: 'error' };
+    }
+
+    const body = (await response.json()) as unknown;
+
+    if (typeof body !== 'object' || body === null || !('id' in body)) {
+      return { status: 'error' };
+    }
+
+    return { status: 'success', group: body as AdminGroup };
+  } catch {
+    return { status: 'error' };
   }
 }
 
