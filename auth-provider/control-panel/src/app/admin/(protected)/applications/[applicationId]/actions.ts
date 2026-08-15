@@ -30,6 +30,16 @@ export interface ApplicationPolicyActionState {
   error: string | null;
 }
 
+export interface RotatedClientCredential {
+  clientId: string;
+  clientSecret: string;
+}
+
+export interface RotateClientSecretActionState {
+  error: string | null;
+  credential: RotatedClientCredential | null;
+}
+
 function readString(formData: FormData, name: ApplicationField): string {
   const value = formData.get(name);
 
@@ -434,4 +444,71 @@ export async function removeApplicationPolicyAction(
       ? 'policy=removed'
       : `policy=removed&revokedUsers=${revokedUserCount}`;
   redirect(`/admin/applications/${encodeURIComponent(applicationId)}?${query}`);
+}
+
+export async function rotateClientSecretAction(
+  applicationId: string,
+  previousState: RotateClientSecretActionState,
+  formData: FormData,
+): Promise<RotateClientSecretActionState> {
+  void previousState;
+  void formData;
+
+  let response: Response;
+
+  try {
+    response = await fetchAdminApi(
+      `/admin/applications/${encodeURIComponent(applicationId)}/rotate-secret`,
+      { method: 'POST' },
+    );
+  } catch {
+    return {
+      error: 'Auth Server tidak dapat dihubungi. Coba lagi setelah service aktif.',
+      credential: null,
+    };
+  }
+
+  if (response.status === 401) {
+    redirect('/admin/login?error=session_required');
+  }
+  if (response.status === 403) {
+    redirect('/admin/login?error=admin_required');
+  }
+
+  if (!response.ok) {
+    return {
+      error:
+        (await readAdminErrorCode(response)) === 'APPLICATION_NOT_FOUND'
+          ? 'Application tidak lagi ditemukan.'
+          : 'Client secret belum dapat dirotasi. Silakan coba lagi.',
+      credential: null,
+    };
+  }
+
+  const body = (await response.json().catch(() => null)) as unknown;
+
+  if (
+    typeof body !== 'object' ||
+    body === null ||
+    !('clientId' in body) ||
+    typeof body.clientId !== 'string' ||
+    !('clientSecret' in body) ||
+    typeof body.clientSecret !== 'string'
+  ) {
+    return {
+      error:
+        'Rotasi berhasil, tetapi client secret baru tidak diterima dengan benar. Lakukan rotasi ulang sebelum application digunakan.',
+      credential: null,
+    };
+  }
+
+  revalidateApplicationViews(applicationId);
+
+  return {
+    error: null,
+    credential: {
+      clientId: body.clientId,
+      clientSecret: body.clientSecret,
+    },
+  };
 }

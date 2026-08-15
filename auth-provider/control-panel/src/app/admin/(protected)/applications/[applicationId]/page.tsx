@@ -4,6 +4,7 @@ import { getAdminApplication, getAdminGroups, type AdminApplication } from '@/li
 import { ApplicationPolicyManager } from './application-policy-manager';
 import { ApplicationStatusForm } from './application-status-form';
 import { RedirectUriManager } from './redirect-uri-manager';
+import { RotateClientSecretForm } from './rotate-client-secret-form';
 import { UpdateApplicationForm } from './update-application-form';
 
 interface AdminApplicationDetailPageProps {
@@ -14,6 +15,7 @@ interface AdminApplicationDetailPageProps {
     redirectUri?: string | string[];
     policy?: string | string[];
     revokedUsers?: string | string[];
+    credential?: string | string[];
   }>;
 }
 
@@ -79,6 +81,7 @@ export default async function AdminApplicationDetailPage({
   const statusResult = readSingle(query.status);
   const redirectUriResult = readSingle(query.redirectUri);
   const policyResult = readSingle(query.policy);
+  const credentialResult = readSingle(query.credential);
   const revokedUsersValue = readSingle(query.revokedUsers);
   const parsedRevokedUserCount =
     revokedUsersValue !== undefined && /^\d+$/.test(revokedUsersValue)
@@ -179,6 +182,16 @@ export default async function AdminApplicationDetailPage({
         </div>
       ) : null}
 
+      {credentialResult === 'rotated' ? (
+        <div
+          className="mt-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-semibold leading-6 text-green-900"
+          role="status"
+        >
+          Rotasi client secret selesai. Pastikan backend application sudah menggunakan secret baru;
+          secret lama tidak dapat digunakan lagi.
+        </div>
+      ) : null}
+
       <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(18rem,1fr)]">
         <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
           <h3 className="text-xl font-bold text-slate-950">Edit application</h3>
@@ -224,16 +237,11 @@ export default async function AdminApplicationDetailPage({
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="font-bold text-slate-950">Client credential</h3>
-            <p className="mt-3 text-xs font-bold tracking-wide text-slate-500 uppercase">
-              Client ID
-            </p>
-            <p className="mt-1 break-all font-mono text-sm text-slate-900">
-              {application.clientId}
-            </p>
-            <p className="mt-4 text-sm leading-6 text-slate-500">
-              Client secret mentah tidak dapat dibaca. Auth Provider hanya menyimpan hash-nya.
-            </p>
+            <RotateClientSecretForm
+              applicationId={application.id}
+              applicationName={application.name}
+              clientId={application.clientId}
+            />
           </section>
         </aside>
       </div>
