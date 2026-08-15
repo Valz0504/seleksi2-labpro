@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getAdminApplication, type AdminApplication } from '@/lib/admin-session';
+import { getAdminApplication, getAdminGroups, type AdminApplication } from '@/lib/admin-session';
+import { ApplicationPolicyManager } from './application-policy-manager';
 import { ApplicationStatusForm } from './application-status-form';
 import { RedirectUriManager } from './redirect-uri-manager';
 import { UpdateApplicationForm } from './update-application-form';
@@ -11,6 +12,8 @@ interface AdminApplicationDetailPageProps {
     updated?: string | string[];
     status?: string | string[];
     redirectUri?: string | string[];
+    policy?: string | string[];
+    revokedUsers?: string | string[];
   }>;
 }
 
@@ -43,7 +46,10 @@ export default async function AdminApplicationDetailPage({
   searchParams,
 }: AdminApplicationDetailPageProps) {
   const [{ applicationId }, query] = await Promise.all([params, searchParams]);
-  const result = await getAdminApplication(applicationId);
+  const [result, groups] = await Promise.all([
+    getAdminApplication(applicationId),
+    getAdminGroups(),
+  ]);
 
   if (result.status === 'not_found') {
     notFound();
@@ -72,6 +78,16 @@ export default async function AdminApplicationDetailPage({
   const wasUpdated = query.updated === '1';
   const statusResult = readSingle(query.status);
   const redirectUriResult = readSingle(query.redirectUri);
+  const policyResult = readSingle(query.policy);
+  const revokedUsersValue = readSingle(query.revokedUsers);
+  const parsedRevokedUserCount =
+    revokedUsersValue !== undefined && /^\d+$/.test(revokedUsersValue)
+      ? Number(revokedUsersValue)
+      : Number.NaN;
+  const revokedUserCount =
+    Number.isSafeInteger(parsedRevokedUserCount) && parsedRevokedUserCount >= 0
+      ? parsedRevokedUserCount
+      : null;
 
   return (
     <>
@@ -137,6 +153,29 @@ export default async function AdminApplicationDetailPage({
         >
           Redirect URI berhasil dihapus. Authorization code yang belum dipakai dan terikat pada URI
           tersebut telah dibuat tidak berlaku.
+        </div>
+      ) : null}
+
+      {policyResult === 'added' ? (
+        <div
+          className="mt-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-semibold text-green-900"
+          role="status"
+        >
+          Group berhasil diizinkan. Anggotanya memperoleh jalur ALLOW pada authorization berikutnya.
+        </div>
+      ) : null}
+
+      {policyResult === 'removed' ? (
+        <div
+          className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold leading-6 text-amber-950"
+          role="status"
+        >
+          Policy berhasil dihapus.{' '}
+          {revokedUserCount === null
+            ? 'Seluruh anggota telah dievaluasi ulang terhadap jalur ALLOW yang tersisa.'
+            : revokedUserCount === 0
+              ? 'Tidak ada user yang kehilangan jalur ALLOW terakhir, sehingga tidak ada session atau token yang dicabut.'
+              : `${revokedUserCount} user kehilangan jalur ALLOW terakhir; central session dan seluruh access token aktif mereka telah dicabut.`}
         </div>
       ) : null}
 
@@ -242,32 +281,12 @@ export default async function AdminApplicationDetailPage({
               {application.groupPolicies.length} policy
             </span>
           </div>
-          <div className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            {application.groupPolicies.length > 0 ? (
-              <ul className="divide-y divide-slate-100">
-                {application.groupPolicies.map(({ id, effect, group }) => (
-                  <li className="flex flex-wrap items-center justify-between gap-3 p-5" key={id}>
-                    <div>
-                      <p className="font-bold text-slate-900">{group.name}</p>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {group.description ?? 'Tanpa deskripsi.'}
-                      </p>
-                    </div>
-                    <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-bold text-violet-800">
-                      {effect}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="p-7 text-center">
-                <p className="font-semibold text-slate-700">Belum ada group yang diizinkan.</p>
-                <p className="mt-1 text-sm leading-6 text-slate-500">
-                  Tanpa policy ALLOW, user tidak dapat mengakses application ini.
-                </p>
-              </div>
-            )}
-          </div>
+          <ApplicationPolicyManager
+            applicationId={application.id}
+            applicationName={application.name}
+            policies={application.groupPolicies}
+            groups={groups}
+          />
         </section>
       </div>
     </>

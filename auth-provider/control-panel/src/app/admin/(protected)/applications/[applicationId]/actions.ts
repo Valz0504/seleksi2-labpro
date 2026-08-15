@@ -26,6 +26,10 @@ export interface RemoveRedirectUriActionState {
   error: string | null;
 }
 
+export interface ApplicationPolicyActionState {
+  error: string | null;
+}
+
 function readString(formData: FormData, name: ApplicationField): string {
   const value = formData.get(name);
 
@@ -311,4 +315,123 @@ export async function removeRedirectUriAction(
 
   revalidateApplicationViews(applicationId);
   redirect(`/admin/applications/${encodeURIComponent(applicationId)}?redirectUri=removed`);
+}
+
+export async function addApplicationPolicyAction(
+  applicationId: string,
+  previousState: ApplicationPolicyActionState,
+  formData: FormData,
+): Promise<ApplicationPolicyActionState> {
+  void previousState;
+
+  const groupValue = formData.get('groupId');
+  const groupId = typeof groupValue === 'string' ? groupValue.trim() : '';
+
+  if (!groupId) {
+    return { error: 'Pilih group yang ingin diizinkan.' };
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetchAdminApi(
+      `/admin/applications/${encodeURIComponent(applicationId)}/policies`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ groupId }),
+      },
+    );
+  } catch {
+    return { error: 'Auth Server tidak dapat dihubungi. Coba lagi setelah service aktif.' };
+  }
+
+  if (response.status === 401) {
+    redirect('/admin/login?error=session_required');
+  }
+  if (response.status === 403) {
+    redirect('/admin/login?error=admin_required');
+  }
+
+  if (!response.ok) {
+    const code = await readAdminErrorCode(response);
+
+    if (code === 'POLICY_ALREADY_EXISTS') {
+      return { error: 'Group tersebut sudah diizinkan untuk application ini.' };
+    }
+    if (code === 'GROUP_NOT_FOUND') {
+      return { error: 'Group tidak lagi ditemukan. Muat ulang halaman.' };
+    }
+
+    return {
+      error:
+        code === 'APPLICATION_NOT_FOUND'
+          ? 'Application tidak lagi ditemukan.'
+          : response.status === 400
+            ? 'Policy ditolak Auth Server. Pilih kembali group yang valid.'
+            : 'Group belum dapat diizinkan. Silakan coba lagi.',
+    };
+  }
+
+  revalidateApplicationViews(applicationId);
+  redirect(`/admin/applications/${encodeURIComponent(applicationId)}?policy=added`);
+}
+
+export async function removeApplicationPolicyAction(
+  applicationId: string,
+  policyId: string,
+  previousState: ApplicationPolicyActionState,
+  formData: FormData,
+): Promise<ApplicationPolicyActionState> {
+  void previousState;
+  void formData;
+
+  let response: Response;
+
+  try {
+    response = await fetchAdminApi(
+      `/admin/applications/${encodeURIComponent(applicationId)}/policies/${encodeURIComponent(policyId)}`,
+      { method: 'DELETE' },
+    );
+  } catch {
+    return { error: 'Auth Server tidak dapat dihubungi. Coba lagi setelah service aktif.' };
+  }
+
+  if (response.status === 401) {
+    redirect('/admin/login?error=session_required');
+  }
+  if (response.status === 403) {
+    redirect('/admin/login?error=admin_required');
+  }
+
+  if (!response.ok) {
+    const code = await readAdminErrorCode(response);
+
+    return {
+      error:
+        code === 'POLICY_NOT_FOUND'
+          ? 'Policy tidak lagi ditemukan. Muat ulang halaman.'
+          : code === 'APPLICATION_NOT_FOUND'
+            ? 'Application tidak lagi ditemukan.'
+            : 'Policy belum dapat dihapus. Silakan coba lagi.',
+    };
+  }
+
+  const body = (await response.json().catch(() => null)) as unknown;
+  const revokedUserCount =
+    typeof body === 'object' &&
+    body !== null &&
+    'revokedUserCount' in body &&
+    typeof body.revokedUserCount === 'number' &&
+    Number.isSafeInteger(body.revokedUserCount) &&
+    body.revokedUserCount >= 0
+      ? body.revokedUserCount
+      : null;
+
+  revalidateApplicationViews(applicationId);
+  const query =
+    revokedUserCount === null
+      ? 'policy=removed'
+      : `policy=removed&revokedUsers=${revokedUserCount}`;
+  redirect(`/admin/applications/${encodeURIComponent(applicationId)}?${query}`);
 }
