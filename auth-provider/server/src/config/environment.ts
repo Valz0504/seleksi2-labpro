@@ -136,5 +136,10 @@ export function validateEnvironment(
       'ACCESS_TOKEN_TTL_SECONDS',
       DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
     ),
+    SWAGGER_ENABLED: parseBoolean(
+      environment['SWAGGER_ENABLED'],
+      'SWAGGER_ENABLED',
+      true,
+    ),
   };
 }

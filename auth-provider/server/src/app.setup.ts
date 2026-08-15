@@ -1,6 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
+import { configureSwagger } from './config/swagger';
 
 export function configureApp(app: INestApplication): void {
   const configService = app.get(ConfigService);
@@ -14,4 +15,5 @@ export function configureApp(app: INestApplication): void {
       whitelist: true,
     }),
   );
+  configureSwagger(app);
 }

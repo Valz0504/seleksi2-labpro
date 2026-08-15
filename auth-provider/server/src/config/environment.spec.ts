@@ -16,6 +16,7 @@ describe('validateEnvironment', () => {
       SSO_SESSION_TTL_SECONDS: 28_800,
       AUTHORIZATION_CODE_TTL_SECONDS: 300,
       ACCESS_TOKEN_TTL_SECONDS: 900,
+      SWAGGER_ENABLED: true,
     });
   });
 
@@ -41,6 +42,12 @@ describe('validateEnvironment', () => {
         SSO_COOKIE_SECURE: 'yes',
       }),
     ).toThrow('SSO_COOKIE_SECURE must be either true or false');
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        SWAGGER_ENABLED: 'yes',
+      }),
+    ).toThrow('SWAGGER_ENABLED must be either true or false');
   });
 
   it('rejects an invalid or credential-bearing login page URL', () => {

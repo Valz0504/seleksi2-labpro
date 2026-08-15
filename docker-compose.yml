@@ -102,6 +102,7 @@ services:
       AUTHORIZATION_CODE_TTL_SECONDS: ${AUTHORIZATION_CODE_TTL_SECONDS}
       ACCESS_TOKEN_TTL_SECONDS: ${ACCESS_TOKEN_TTL_SECONDS}
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-true}
     depends_on:
       primary-db-seed:
         condition: service_completed_successfully

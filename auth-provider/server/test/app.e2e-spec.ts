@@ -10,6 +10,19 @@ import { hashSecret } from './../src/common/security/secret';
 import { PrismaService } from './../src/database/prisma.service';
 
 describe('AppController (e2e)', () => {
+  type OpenApiDocument = {
+    openapi: string;
+    info: { title: string };
+    paths: Record<string, Record<string, unknown>>;
+    components?: {
+      securitySchemes?: Record<string, unknown>;
+      schemas?: Record<
+        string,
+        { properties?: Record<string, Record<string, unknown>> }
+      >;
+    };
+  };
+
   const applicationId = '33333333-3333-4333-8333-333333333333';
   const applicationRedirectUri = 'http://localhost:3002/auth/callback';
   const clientSecret = 'e2e-client-secret';
@@ -419,6 +432,61 @@ describe('AppController (e2e)', () => {
           service: 'auth-server',
         });
         expect(body.timestamp).toEqual(expect.any(String));
+      });
+  });
+
+  it('GET /docs-json publishes the complete Auth Provider contract safely', () => {
+    return request(app.getHttpServer())
+      .get('/docs-json')
+      .expect(200)
+      .expect(({ body }: { body: OpenApiDocument }) => {
+        const documentedMethods = new Set([
+          'delete',
+          'get',
+          'head',
+          'options',
+          'patch',
+          'post',
+          'put',
+          'trace',
+        ]);
+        const operationCount = Object.values(body.paths).reduce(
+          (total, pathItem) =>
+            total +
+            Object.keys(pathItem).filter((method) =>
+              documentedMethods.has(method),
+            ).length,
+          0,
+        );
+
+        expect(body.openapi).toMatch(/^3\./);
+        expect(body.info.title).toBe('Auth Provider API');
+        expect(body.paths).toHaveProperty('/authorize');
+        expect(body.paths).toHaveProperty('/token');
+        expect(body.paths).toHaveProperty('/userinfo');
+        expect(body.paths).toHaveProperty('/admin/users');
+        expect(body.paths).toHaveProperty(
+          '/admin/applications/{applicationId}/rotate-secret',
+        );
+        expect(body.components?.securitySchemes).toHaveProperty('accessToken');
+        expect(body.components?.securitySchemes).toHaveProperty(
+          'centralSession',
+        );
+        expect(body.components?.securitySchemes).toHaveProperty(
+          'clientCredentials',
+        );
+        expect(operationCount).toBe(33);
+        expect(
+          body.components?.schemas?.['CreateUserDto']?.properties?.['password'],
+        ).toMatchObject({ writeOnly: true });
+
+        const serializedDocument = JSON.stringify(body);
+        expect(serializedDocument).not.toContain(
+          'e2e-only-cookie-signing-secret-with-32-characters',
+        );
+        expect(serializedDocument).not.toContain(clientSecret);
+        expect(serializedDocument).not.toContain('passwordHash');
+        expect(serializedDocument).not.toContain('clientSecretHash');
       });
   });
 
