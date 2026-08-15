@@ -164,6 +164,26 @@ describe('AdminApplicationsService', () => {
     expect(transaction.ssoSession.updateMany).not.toHaveBeenCalled();
   });
 
+  it('rotates a client secret atomically, invalidates the old secret, and never audits raw values', async () => {
+    const oldClientSecret = 'old-client-secret-with-at-least-32-characters';
+
+    const result = await service.rotateClientSecret(applicationId, actor);
+    const updateCalls = transaction.application.update.mock
+      .calls as unknown as Array<
+      [{ data: { clientSecretHash: string }; where: { id: string } }]
+    >;
+    const newClientSecretHash = updateCalls[0]?.[0].data.clientSecretHash;
+
+    expect(transaction.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(result.clientId).toBe(applicationRecord.clientId);
+    expect(result.clientSecret).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(verifySecret(result.clientSecret, newClientSecretHash)).toBe(true);
+    expect(verifySecret(oldClientSecret, newClientSecretHash)).toBe(false);
+    expect(
+      JSON.stringify(transaction.auditLog.create.mock.calls),
+    ).not.toContain(result.clientSecret);
+  });
+
   it('adds an exact redirect URI while holding the application lock', async () => {
     const redirectUri = 'http://localhost:4001/auth/callback';
     transaction.applicationRedirectUri.create.mockResolvedValue({

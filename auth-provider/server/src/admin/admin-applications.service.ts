@@ -216,18 +216,26 @@ export class AdminApplicationsService {
   }
 
   async rotateClientSecret(applicationId: string, actor: AdminActor) {
-    const application = await this.prisma.application.findUnique({
-      where: { id: applicationId },
-      select: { id: true, clientId: true },
-    });
+    return this.prisma.$transaction(async (transaction) => {
+      const lockedApplications = await transaction.$queryRaw<
+        Array<{ id: string }>
+      >`SELECT "id" FROM "applications" WHERE "id" = ${applicationId}::uuid FOR UPDATE`;
 
-    if (!application) {
-      throw this.applicationNotFound();
-    }
+      if (lockedApplications.length === 0) {
+        throw this.applicationNotFound();
+      }
 
-    const clientSecret = generateOpaqueToken();
+      const application = await transaction.application.findUnique({
+        where: { id: applicationId },
+        select: { id: true, clientId: true },
+      });
 
-    await this.prisma.$transaction(async (transaction) => {
+      if (!application) {
+        throw this.applicationNotFound();
+      }
+
+      const clientSecret = generateOpaqueToken();
+
       await transaction.application.update({
         where: { id: applicationId },
         data: { clientSecretHash: hashSecret(clientSecret) },
@@ -247,9 +255,9 @@ export class AdminApplicationsService {
           ipAddress: actor.ipAddress,
         },
       });
-    });
 
-    return { clientId: application.clientId, clientSecret };
+      return { clientId: application.clientId, clientSecret };
+    });
   }
 
   async addRedirectUri(
