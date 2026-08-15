@@ -120,12 +120,12 @@ export class AdminApplicationsController {
   }
 
   @Delete(':applicationId/policies/:policyId')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   removePolicy(
     @Param('applicationId', ParseUUIDPipe) applicationId: string,
     @Param('policyId', ParseUUIDPipe) policyId: string,
     @Req() request: AdminRequest,
-  ): Promise<void> {
+  ): Promise<{ revokedUserCount: number }> {
     return this.applicationsService.removePolicy(
       applicationId,
       policyId,

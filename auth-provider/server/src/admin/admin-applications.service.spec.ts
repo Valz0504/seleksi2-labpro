@@ -45,8 +45,10 @@ describe('AdminApplicationsService', () => {
     authorizationCode: { updateMany: jest.fn() },
     accessToken: { updateMany: jest.fn() },
     applicationGroupPolicy: {
+      create: jest.fn(),
       delete: jest.fn(),
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
     },
     ssoSession: { updateMany: jest.fn() },
     auditLog: { create: jest.fn() },
@@ -76,7 +78,18 @@ describe('AdminApplicationsService', () => {
     transaction.authorizationCode.updateMany.mockResolvedValue({ count: 1 });
     transaction.accessToken.updateMany.mockResolvedValue({ count: 1 });
     transaction.auditLog.create.mockResolvedValue({});
+    transaction.applicationGroupPolicy.create.mockResolvedValue({
+      id: '33333333-3333-4333-8333-333333333333',
+      effect: 'ALLOW',
+      createdAt: new Date(),
+      group: {
+        id: '44444444-4444-4444-8444-444444444444',
+        name: 'managed-group',
+        description: null,
+      },
+    });
     transaction.applicationGroupPolicy.delete.mockResolvedValue({});
+    transaction.applicationGroupPolicy.findUnique.mockResolvedValue(null);
     prisma.$transaction.mockImplementation(
       (callback: (value: typeof transaction) => Promise<unknown>) =>
         callback(transaction),
@@ -269,9 +282,47 @@ describe('AdminApplicationsService', () => {
     );
   });
 
+  it('adds an ALLOW policy while locking the application and group', async () => {
+    const groupId = '44444444-4444-4444-8444-444444444444';
+    transaction.$queryRaw
+      .mockResolvedValueOnce([{ id: applicationId }])
+      .mockResolvedValueOnce([{ id: groupId, name: 'managed-group' }]);
+
+    const result = await service.addPolicy(applicationId, { groupId }, actor);
+
+    expect(transaction.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(transaction.applicationGroupPolicy.create).toHaveBeenCalledWith({
+      data: { applicationId, groupId, effect: 'ALLOW' },
+      select: {
+        id: true,
+        effect: true,
+        createdAt: true,
+        group: {
+          select: { id: true, name: true, description: true },
+        },
+      },
+    });
+    expect(result).toMatchObject({ effect: 'ALLOW' });
+  });
+
+  it('rejects a duplicate ALLOW policy without writing another record', async () => {
+    const groupId = '44444444-4444-4444-8444-444444444444';
+    transaction.$queryRaw
+      .mockResolvedValueOnce([{ id: applicationId }])
+      .mockResolvedValueOnce([{ id: groupId, name: 'managed-group' }]);
+    transaction.applicationGroupPolicy.findUnique.mockResolvedValue({
+      id: '33333333-3333-4333-8333-333333333333',
+    });
+
+    await expect(
+      service.addPolicy(applicationId, { groupId }, actor),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(transaction.applicationGroupPolicy.create).not.toHaveBeenCalled();
+  });
+
   it('revokes users who lose their final policy path after policy removal', async () => {
     const policyId = '33333333-3333-4333-8333-333333333333';
-    prisma.applicationGroupPolicy.findFirst.mockResolvedValue({
+    transaction.applicationGroupPolicy.findFirst.mockResolvedValue({
       id: policyId,
       groupId: '44444444-4444-4444-8444-444444444444',
       group: {
@@ -283,7 +334,7 @@ describe('AdminApplicationsService', () => {
       'managed-user',
     ]);
 
-    await service.removePolicy(applicationId, policyId, actor);
+    const result = await service.removePolicy(applicationId, policyId, actor);
 
     const revocationCalls = revocationService.revokeUsersWhoLostAccess.mock
       .calls as unknown as Array<
@@ -311,5 +362,6 @@ describe('AdminApplicationsService', () => {
       eventType: 'PolicyChanged',
       metadata: { revokedUserCount: 1 },
     });
+    expect(result).toEqual({ revokedUserCount: 1 });
   });
 });

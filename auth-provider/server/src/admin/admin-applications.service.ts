@@ -414,45 +414,47 @@ export class AdminApplicationsService {
     input: CreatePolicyDto,
     actor: AdminActor,
   ) {
-    const [application, group, existingPolicy] = await Promise.all([
-      this.prisma.application.findUnique({
-        where: { id: applicationId },
-        select: { id: true },
-      }),
-      this.prisma.group.findUnique({
-        where: { id: input.groupId },
-        select: { id: true, name: true },
-      }),
-      this.prisma.applicationGroupPolicy.findUnique({
-        where: {
-          applicationId_groupId_effect: {
-            applicationId,
-            groupId: input.groupId,
-            effect: 'ALLOW',
-          },
-        },
-        select: { id: true },
-      }),
-    ]);
-
-    if (!application) {
-      throw this.applicationNotFound();
-    }
-    if (!group) {
-      throw new NotFoundException({
-        error: { code: 'GROUP_NOT_FOUND', message: 'Group tidak ditemukan' },
-      });
-    }
-    if (existingPolicy) {
-      throw new ConflictException({
-        error: {
-          code: 'POLICY_ALREADY_EXISTS',
-          message: 'Policy ALLOW untuk group dan aplikasi sudah ada',
-        },
-      });
-    }
-
     return this.prisma.$transaction(async (transaction) => {
+      const lockedApplications = await transaction.$queryRaw<
+        Array<{ id: string }>
+      >`SELECT "id" FROM "applications" WHERE "id" = ${applicationId}::uuid FOR UPDATE`;
+
+      if (lockedApplications.length === 0) {
+        throw this.applicationNotFound();
+      }
+
+      const lockedGroups = await transaction.$queryRaw<
+        Array<{ id: string; name: string }>
+      >`SELECT "id", "name" FROM "groups" WHERE "id" = ${input.groupId}::uuid FOR KEY SHARE`;
+      const group = lockedGroups[0];
+
+      if (!group) {
+        throw new NotFoundException({
+          error: { code: 'GROUP_NOT_FOUND', message: 'Group tidak ditemukan' },
+        });
+      }
+
+      const existingPolicy =
+        await transaction.applicationGroupPolicy.findUnique({
+          where: {
+            applicationId_groupId_effect: {
+              applicationId,
+              groupId: input.groupId,
+              effect: 'ALLOW',
+            },
+          },
+          select: { id: true },
+        });
+
+      if (existingPolicy) {
+        throw new ConflictException({
+          error: {
+            code: 'POLICY_ALREADY_EXISTS',
+            message: 'Policy ALLOW untuk group dan aplikasi sudah ada',
+          },
+        });
+      }
+
       const policy = await transaction.applicationGroupPolicy.create({
         data: {
           applicationId,
@@ -495,36 +497,58 @@ export class AdminApplicationsService {
     applicationId: string,
     policyId: string,
     actor: AdminActor,
-  ): Promise<void> {
-    const policy = await this.prisma.applicationGroupPolicy.findFirst({
-      where: { id: policyId, applicationId },
-      select: {
-        id: true,
-        groupId: true,
-        group: {
-          select: {
-            name: true,
-            userGroups: { select: { userId: true } },
-          },
-        },
-      },
-    });
-
-    if (!policy) {
-      throw new NotFoundException({
-        error: {
-          code: 'POLICY_NOT_FOUND',
-          message: 'Policy tidak ditemukan untuk aplikasi ini',
-        },
-      });
-    }
-
-    const candidateUserIds = policy.group.userGroups.map(
-      ({ userId }) => userId,
-    );
+  ): Promise<{ revokedUserCount: number }> {
     const now = new Date();
 
-    await this.prisma.$transaction(async (transaction) => {
+    return this.prisma.$transaction(async (transaction) => {
+      const lockedApplications = await transaction.$queryRaw<
+        Array<{ id: string }>
+      >`SELECT "id" FROM "applications" WHERE "id" = ${applicationId}::uuid FOR UPDATE`;
+
+      if (lockedApplications.length === 0) {
+        throw this.applicationNotFound();
+      }
+
+      const lockedPolicies = await transaction.$queryRaw<
+        Array<{ id: string }>
+      >`SELECT "id" FROM "application_group_policies" WHERE "id" = ${policyId}::uuid AND "application_id" = ${applicationId}::uuid FOR UPDATE`;
+
+      if (lockedPolicies.length === 0) {
+        throw new NotFoundException({
+          error: {
+            code: 'POLICY_NOT_FOUND',
+            message: 'Policy tidak ditemukan untuk aplikasi ini',
+          },
+        });
+      }
+
+      const policy = await transaction.applicationGroupPolicy.findFirst({
+        where: { id: policyId, applicationId },
+        select: {
+          id: true,
+          groupId: true,
+          group: {
+            select: {
+              name: true,
+              userGroups: { select: { userId: true } },
+            },
+          },
+        },
+      });
+
+      if (!policy) {
+        throw new NotFoundException({
+          error: {
+            code: 'POLICY_NOT_FOUND',
+            message: 'Policy tidak ditemukan untuk aplikasi ini',
+          },
+        });
+      }
+
+      const candidateUserIds = policy.group.userGroups.map(
+        ({ userId }) => userId,
+      );
+
       await transaction.applicationGroupPolicy.delete({
         where: { id: policy.id },
       });
@@ -553,6 +577,8 @@ export class AdminApplicationsService {
           ipAddress: actor.ipAddress,
         },
       });
+
+      return { revokedUserCount: revokedUserIds.length };
     });
   }
 
