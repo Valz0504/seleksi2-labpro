@@ -1,5 +1,5 @@
 import type { OAuthUserInfo } from './oauth-callback';
-import { classifyLocalSession } from './local-session-state';
+import { canRevokeLocalSession, classifyLocalSession } from './local-session-state';
 import {
   generateLocalSessionToken,
   hashLocalSessionToken,
@@ -34,6 +34,8 @@ export interface ActiveLocalSession {
 
 export type LocalSessionResolution =
   ActiveLocalSession | { state: 'EXPIRED' | 'REVOKED' | 'INVALID' };
+
+export type LocalSessionRevocationResult = 'REVOKED' | 'NO_CHANGE';
 
 function readCachedGroups(value: unknown): string[] {
   return Array.isArray(value) && value.every((group): group is string => typeof group === 'string')
@@ -230,6 +232,67 @@ export async function issueLocalSession(
   });
 
   return { token, id: localSession.id, expiresAt };
+}
+
+export async function revokeLocalSession(
+  token: string,
+  requestId: string,
+  now = new Date(),
+): Promise<LocalSessionRevocationResult> {
+  if (!isLocalSessionToken(token)) {
+    return 'NO_CHANGE';
+  }
+
+  const database = getLocalDatabase();
+  const sessionTokenHash = hashLocalSessionToken(token);
+
+  return database.$transaction<LocalSessionRevocationResult>(async (transaction) => {
+    const session = await transaction.localSession.findUnique({
+      where: { sessionTokenHash },
+      select: {
+        id: true,
+        externalUserId: true,
+        status: true,
+        expiresAt: true,
+        revokedAt: true,
+      },
+    });
+
+    if (!session || !canRevokeLocalSession(session, now)) {
+      return 'NO_CHANGE';
+    }
+
+    const revokedSession = await transaction.localSession.updateMany({
+      where: {
+        id: session.id,
+        status: 'ACTIVE',
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      data: {
+        status: 'REVOKED',
+        revokedAt: now,
+        revokeReason: 'local_logout',
+      },
+    });
+
+    if (revokedSession.count !== 1) {
+      return 'NO_CHANGE';
+    }
+
+    await transaction.activityLog.create({
+      data: {
+        eventType: 'LocalLogout',
+        result: 'SUCCESS',
+        message: 'Local session dicabut melalui logout aplikasi',
+        externalUserId: session.externalUserId,
+        localSessionId: session.id,
+        requestId,
+      },
+    });
+
+    return 'REVOKED';
+  });
 }
 
 export async function recordCallbackFailure(requestId: string, reason: string): Promise<void> {

@@ -12,6 +12,8 @@ interface HomeProps {
 interface ActiveDashboardProps {
   resolution: ActiveLocalSession;
   dashboard: LocalDashboardViewModel | null;
+  logoutFailed: boolean;
+  requestId: string | null;
 }
 
 const APPLICATION_NAME = 'App B';
@@ -39,6 +41,10 @@ function readSessionNotice(value: string | string[] | undefined): string | null 
     return 'Local session tidak valid. Silakan login kembali.';
   }
 
+  if (value === 'logged_out') {
+    return `Anda telah logout dari ${APPLICATION_NAME}. Central session dan session aplikasi lain tidak berubah.`;
+  }
+
   return null;
 }
 
@@ -60,7 +66,7 @@ function activityResultClasses(result: string): string {
   return 'bg-slate-100 text-slate-700';
 }
 
-function ActiveDashboard({ resolution, dashboard }: ActiveDashboardProps) {
+function ActiveDashboard({ resolution, dashboard, logoutFailed, requestId }: ActiveDashboardProps) {
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-8 sm:px-6 lg:px-8">
       <div className="mx-auto grid w-full max-w-6xl gap-6">
@@ -75,11 +81,36 @@ function ActiveDashboard({ resolution, dashboard }: ActiveDashboardProps) {
               </h1>
               <p className="mt-2 text-slate-600">{resolution.profile.email}</p>
             </div>
-            <span className="w-fit rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-700">
-              Local session aktif
-            </span>
+            <div className="flex items-start gap-3 sm:flex-col sm:items-end">
+              <span className="w-fit rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-700">
+                Local session aktif
+              </span>
+              <form action="/auth/logout" method="post">
+                <button
+                  type="submit"
+                  className="cursor-pointer rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-700 transition hover:border-red-300 hover:bg-red-100 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-red-600/30"
+                >
+                  Logout dari {APPLICATION_NAME}
+                </button>
+              </form>
+              <p className="max-w-52 text-right text-xs leading-5 text-slate-500">
+                Hanya mengakhiri local session {APPLICATION_NAME}.
+              </p>
+            </div>
           </div>
         </header>
+
+        {logoutFailed ? (
+          <section className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900">
+            <h2 className="font-bold">Logout belum dapat diselesaikan</h2>
+            <p className="mt-1 text-sm leading-6">
+              Local session tetap dipertahankan agar Anda dapat mencoba logout kembali.
+            </p>
+            {requestId ? (
+              <p className="mt-2 text-xs text-red-700">Request ID: {requestId}</p>
+            ) : null}
+          </section>
+        ) : null}
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-900/5 sm:p-7">
@@ -261,6 +292,7 @@ export default async function Home({ searchParams }: HomeProps) {
   const callbackFailed = query['login_error'] === 'oauth_callback_failed';
   const requestId = typeof query['request_id'] === 'string' ? query['request_id'] : null;
   const sessionNotice = readSessionNotice(query['session_notice']);
+  const logoutFailed = query['logout_error'] === 'local_logout_failed';
 
   if (token) {
     const resolution = await resolveLocalSession(token).catch(() => null);
@@ -292,7 +324,14 @@ export default async function Home({ searchParams }: HomeProps) {
       localSessionId: resolution.session.id,
     }).catch(() => null);
 
-    return <ActiveDashboard resolution={resolution} dashboard={dashboard} />;
+    return (
+      <ActiveDashboard
+        resolution={resolution}
+        dashboard={dashboard}
+        logoutFailed={logoutFailed}
+        requestId={requestId}
+      />
+    );
   }
 
   return (

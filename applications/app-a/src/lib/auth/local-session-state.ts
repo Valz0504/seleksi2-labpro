@@ -20,3 +20,7 @@ export function classifyLocalSession(
 
   return 'ACTIVE';
 }
+
+export function canRevokeLocalSession(session: LocalSessionStateInput, now: Date): boolean {
+  return classifyLocalSession(session, now) === 'ACTIVE';
+}
