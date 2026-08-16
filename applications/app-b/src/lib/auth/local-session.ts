@@ -1,11 +1,160 @@
 import type { OAuthUserInfo } from './oauth-callback';
-import { generateLocalSessionToken, hashLocalSessionToken } from './session-token';
+import { classifyLocalSession } from './local-session-state';
+import {
+  generateLocalSessionToken,
+  hashLocalSessionToken,
+  isLocalSessionToken,
+} from './session-token';
 import { getLocalDatabase } from '../database/client';
 
 export interface IssuedLocalSession {
   token: string;
   id: string;
   expiresAt: Date;
+}
+
+export interface ActiveLocalSession {
+  state: 'ACTIVE';
+  profile: {
+    externalUserId: string;
+    name: string;
+    email: string;
+    groups: string[];
+    syncedAt: Date;
+  };
+  session: {
+    id: string;
+    centralSessionId: string;
+    status: 'ACTIVE';
+    createdAt: Date;
+    expiresAt: Date;
+    lastActivityAt: Date;
+  };
+}
+
+export type LocalSessionResolution =
+  ActiveLocalSession | { state: 'EXPIRED' | 'REVOKED' | 'INVALID' };
+
+function readCachedGroups(value: unknown): string[] {
+  return Array.isArray(value) && value.every((group): group is string => typeof group === 'string')
+    ? value
+    : [];
+}
+
+export async function resolveLocalSession(
+  token: string,
+  now = new Date(),
+): Promise<LocalSessionResolution> {
+  if (!isLocalSessionToken(token)) {
+    return { state: 'INVALID' };
+  }
+
+  const database = getLocalDatabase();
+  const sessionTokenHash = hashLocalSessionToken(token);
+
+  return database.$transaction<LocalSessionResolution>(async (transaction) => {
+    const session = await transaction.localSession.findUnique({
+      where: { sessionTokenHash },
+      select: {
+        id: true,
+        centralSessionId: true,
+        status: true,
+        createdAt: true,
+        expiresAt: true,
+        lastActivityAt: true,
+        revokedAt: true,
+        profile: {
+          select: {
+            externalUserId: true,
+            name: true,
+            email: true,
+            groups: true,
+            syncedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!session) {
+      return { state: 'INVALID' };
+    }
+
+    const lifecycleState = classifyLocalSession(session, now);
+
+    if (lifecycleState === 'EXPIRED') {
+      const expiredSession = await transaction.localSession.updateMany({
+        where: {
+          id: session.id,
+          status: 'ACTIVE',
+          revokedAt: null,
+          expiresAt: { lte: now },
+        },
+        data: { status: 'EXPIRED' },
+      });
+
+      if (expiredSession.count === 1) {
+        await transaction.activityLog.create({
+          data: {
+            eventType: 'LocalSessionExpired',
+            result: 'SUCCESS',
+            message: 'Local session ditandai kedaluwarsa saat diperiksa',
+            externalUserId: session.profile.externalUserId,
+            localSessionId: session.id,
+          },
+        });
+      }
+
+      return { state: 'EXPIRED' };
+    }
+
+    if (lifecycleState === 'REVOKED') {
+      return { state: 'REVOKED' };
+    }
+
+    const activeSession = await transaction.localSession.updateMany({
+      where: {
+        id: session.id,
+        status: 'ACTIVE',
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      data: { lastActivityAt: now },
+    });
+
+    if (activeSession.count !== 1) {
+      const currentSession = await transaction.localSession.findUnique({
+        where: { id: session.id },
+        select: { status: true, expiresAt: true, revokedAt: true },
+      });
+
+      if (!currentSession) {
+        return { state: 'INVALID' };
+      }
+
+      const currentState = classifyLocalSession(currentSession, now);
+
+      return currentState === 'ACTIVE' ? { state: 'INVALID' } : { state: currentState };
+    }
+
+    return {
+      state: 'ACTIVE',
+      profile: {
+        externalUserId: session.profile.externalUserId,
+        name: session.profile.name,
+        email: session.profile.email,
+        groups: readCachedGroups(session.profile.groups),
+        syncedAt: session.profile.syncedAt,
+      },
+      session: {
+        id: session.id,
+        centralSessionId: session.centralSessionId,
+        status: 'ACTIVE',
+        createdAt: session.createdAt,
+        expiresAt: session.expiresAt,
+        lastActivityAt: now,
+      },
+    };
+  });
 }
 
 export async function issueLocalSession(
