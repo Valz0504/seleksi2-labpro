@@ -4,6 +4,7 @@ export interface RelyingApplicationEnvironmentNames {
   clientSecret: string;
   redirectUri: string;
   launchUrl: string;
+  oauthTransactionCookieName: string;
 }
 
 export interface RelyingApplicationConfig {
@@ -15,6 +16,8 @@ export interface RelyingApplicationConfig {
   authorizeUrl: string;
   tokenUrl: string;
   userInfoUrl: string;
+  oauthTransactionCookieName: string;
+  oauthTransactionCookieSecure: boolean;
 }
 
 type Environment = Readonly<Record<string, string | undefined>>;
@@ -108,6 +111,12 @@ export function validateRelyingApplicationEnvironment(
     );
   }
 
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(names.oauthTransactionCookieName)) {
+    throw new Error(
+      'oauthTransactionCookieName hanya boleh berisi huruf, angka, underscore, dan hyphen',
+    );
+  }
+
   const clientSecret = requireBoundedString(environment, names.clientSecret, 16, 1024);
   const launchUrl = requireBaseHttpUrl(environment, names.launchUrl);
   const redirectUri = requireRedirectUri(environment, names.redirectUri, launchUrl);
@@ -127,5 +136,7 @@ export function validateRelyingApplicationEnvironment(
     authorizeUrl: new URL('/authorize', publicAuthServerUrl).toString(),
     tokenUrl: new URL('/token', internalAuthServerUrl).toString(),
     userInfoUrl: new URL('/userinfo', internalAuthServerUrl).toString(),
+    oauthTransactionCookieName: names.oauthTransactionCookieName,
+    oauthTransactionCookieSecure: launchUrl.protocol === 'https:',
   };
 }

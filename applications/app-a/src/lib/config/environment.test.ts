@@ -8,6 +8,7 @@ const names = {
   clientSecret: 'APP_A_CLIENT_SECRET',
   redirectUri: 'APP_A_REDIRECT_URI',
   launchUrl: 'APP_A_LAUNCH_URL',
+  oauthTransactionCookieName: 'app_a_oauth_transaction',
 };
 
 const validEnvironment = {
@@ -32,6 +33,8 @@ describe('validateRelyingApplicationEnvironment for App A', () => {
       authorizeUrl: 'http://localhost:3001/authorize',
       tokenUrl: 'http://auth-server:3001/token',
       userInfoUrl: 'http://auth-server:3001/userinfo',
+      oauthTransactionCookieName: 'app_a_oauth_transaction',
+      oauthTransactionCookieSecure: false,
     });
   });
 

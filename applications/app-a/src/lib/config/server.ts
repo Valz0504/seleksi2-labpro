@@ -14,6 +14,7 @@ export function getRelyingApplicationConfig(): RelyingApplicationConfig {
     clientSecret: 'APP_A_CLIENT_SECRET',
     redirectUri: 'APP_A_REDIRECT_URI',
     launchUrl: 'APP_A_LAUNCH_URL',
+    oauthTransactionCookieName: 'app_a_oauth_transaction',
   });
 
   return cachedConfig;
