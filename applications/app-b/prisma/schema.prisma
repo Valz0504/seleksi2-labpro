@@ -70,6 +70,7 @@ model ActivityLog {
 model ProcessedEvent {
   eventId     String   @id @map("event_id") @db.Uuid
   eventType   String   @map("event_type") @db.VarChar(100)
+  payloadHash String?  @map("payload_hash") @db.Char(64)
   processedAt DateTime @default(now()) @map("processed_at")
   result      String   @db.Text
 
