@@ -5,6 +5,7 @@ node_modules/
 !.env.example
 
 .next/
+applications/*/src/generated/prisma/
 dist/
 coverage/
 

@@ -3,26 +3,35 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3002",
-    "build": "next build",
+    "dev": "prisma generate && next dev --port 3002",
+    "build": "prisma generate && next build",
     "start": "next start --port 3002",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
-    "typecheck": "tsc --noEmit --incremental false",
-    "test": "tsx --test src/lib/config/environment.test.ts src/lib/auth/oauth-login.test.ts"
+    "typecheck": "prisma generate && tsc --noEmit --incremental false",
+    "test": "tsx --test src/lib/config/environment.test.ts src/lib/database/environment.test.ts src/lib/auth/oauth-login.test.ts",
+    "database:generate": "prisma generate",
+    "database:migrate": "prisma migrate deploy",
+    "database:status": "prisma migrate status"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
     "next": "16.3.0",
+    "pg": "^8.22.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.20.4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
+    "prisma": "^7.9.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.9",
     "typescript": "^5"
