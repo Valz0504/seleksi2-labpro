@@ -5,6 +5,7 @@ export interface RelyingApplicationEnvironmentNames {
   redirectUri: string;
   launchUrl: string;
   oauthTransactionCookieName: string;
+  localSessionCookieName: string;
 }
 
 export interface RelyingApplicationConfig {
@@ -18,6 +19,9 @@ export interface RelyingApplicationConfig {
   userInfoUrl: string;
   oauthTransactionCookieName: string;
   oauthTransactionCookieSecure: boolean;
+  localSessionCookieName: string;
+  localSessionCookieSecure: boolean;
+  localSessionTtlSeconds: number;
 }
 
 type Environment = Readonly<Record<string, string | undefined>>;
@@ -99,6 +103,32 @@ function requireRedirectUri(environment: Environment, name: string, launchUrl: U
   }
 }
 
+function readBoundedInteger(
+  environment: Environment,
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const rawValue = environment[name];
+
+  if (rawValue === undefined) {
+    return fallback;
+  }
+
+  if (!/^[1-9][0-9]*$/.test(rawValue)) {
+    throw new Error(`${name} harus berupa bilangan bulat positif`);
+  }
+
+  const value = Number(rawValue);
+
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} harus berada pada rentang ${minimum}-${maximum} detik`);
+  }
+
+  return value;
+}
+
 export function validateRelyingApplicationEnvironment(
   environment: Environment,
   names: RelyingApplicationEnvironmentNames,
@@ -114,6 +144,12 @@ export function validateRelyingApplicationEnvironment(
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(names.oauthTransactionCookieName)) {
     throw new Error(
       'oauthTransactionCookieName hanya boleh berisi huruf, angka, underscore, dan hyphen',
+    );
+  }
+
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(names.localSessionCookieName)) {
+    throw new Error(
+      'localSessionCookieName hanya boleh berisi huruf, angka, underscore, dan hyphen',
     );
   }
 
@@ -138,5 +174,14 @@ export function validateRelyingApplicationEnvironment(
     userInfoUrl: new URL('/userinfo', internalAuthServerUrl).toString(),
     oauthTransactionCookieName: names.oauthTransactionCookieName,
     oauthTransactionCookieSecure: launchUrl.protocol === 'https:',
+    localSessionCookieName: names.localSessionCookieName,
+    localSessionCookieSecure: launchUrl.protocol === 'https:',
+    localSessionTtlSeconds: readBoundedInteger(
+      environment,
+      'LOCAL_SESSION_TTL_SECONDS',
+      8 * 60 * 60,
+      5 * 60,
+      24 * 60 * 60,
+    ),
   };
 }

@@ -19,6 +19,9 @@ const config: RelyingApplicationConfig = {
   userInfoUrl: 'http://auth-server:3001/userinfo',
   oauthTransactionCookieName: 'app_b_oauth_transaction',
   oauthTransactionCookieSecure: false,
+  localSessionCookieName: 'app_b_local_session',
+  localSessionCookieSecure: false,
+  localSessionTtlSeconds: 28_800,
 };
 const issuedAt = new Date('2026-08-16T00:00:00.000Z');
 

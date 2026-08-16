@@ -9,6 +9,7 @@ const names = {
   redirectUri: 'APP_A_REDIRECT_URI',
   launchUrl: 'APP_A_LAUNCH_URL',
   oauthTransactionCookieName: 'app_a_oauth_transaction',
+  localSessionCookieName: 'app_a_local_session',
 };
 
 const validEnvironment = {
@@ -35,7 +36,29 @@ describe('validateRelyingApplicationEnvironment for App A', () => {
       userInfoUrl: 'http://auth-server:3001/userinfo',
       oauthTransactionCookieName: 'app_a_oauth_transaction',
       oauthTransactionCookieSecure: false,
+      localSessionCookieName: 'app_a_local_session',
+      localSessionCookieSecure: false,
+      localSessionTtlSeconds: 28_800,
     });
+  });
+
+  it('validates an explicit local session lifetime', () => {
+    assert.equal(
+      validateRelyingApplicationEnvironment(
+        { ...validEnvironment, LOCAL_SESSION_TTL_SECONDS: '3600' },
+        names,
+      ).localSessionTtlSeconds,
+      3600,
+    );
+
+    assert.throws(
+      () =>
+        validateRelyingApplicationEnvironment(
+          { ...validEnvironment, LOCAL_SESSION_TTL_SECONDS: '120' },
+          names,
+        ),
+      /LOCAL_SESSION_TTL_SECONDS harus berada pada rentang 300-86400 detik/,
+    );
   });
 
   it('rejects a missing or undersized confidential client secret', () => {
