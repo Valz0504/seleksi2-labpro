@@ -59,4 +59,25 @@ describe('FrontChannelLoginService', () => {
     expect(loginPageUrl.searchParams.get('error')).toBe('invalid_credentials');
     expect(service.getAdminDashboardUrl()).toBe('http://localhost:3000/admin');
   });
+
+  it('accepts only the exact public Auth Provider UI origin', () => {
+    expect(service.isPublicUiOrigin('http://localhost:3000')).toBe(true);
+
+    for (const origin of [
+      undefined,
+      'http://localhost:3001',
+      'https://localhost:3000',
+      'http://localhost:3000.evil.example',
+      'not-a-url',
+    ]) {
+      expect(service.isPublicUiOrigin(origin)).toBe(false);
+    }
+  });
+
+  it('builds a fixed public home destination with an optional safe notice', () => {
+    expect(service.buildPublicHomeUrl()).toBe('http://localhost:3000/');
+    expect(service.buildPublicHomeUrl('sso_logged_out')).toBe(
+      'http://localhost:3000/?session_notice=sso_logged_out',
+    );
+  });
 });

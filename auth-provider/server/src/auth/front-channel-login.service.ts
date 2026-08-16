@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 const AUTH_SERVER_BASE_URL = 'http://auth-server.internal';
 
 export type LoginPageError = 'invalid_credentials';
+export type PublicHomeNotice = 'sso_logged_out';
 
 @Injectable()
 export class FrontChannelLoginService {
@@ -70,6 +71,35 @@ export class FrontChannelLoginService {
     return this.configService.getOrThrow<string>(
       'CONTROL_PANEL_ADMIN_DASHBOARD_URL',
     );
+  }
+
+  isPublicUiOrigin(origin: string | undefined): boolean {
+    if (!origin) {
+      return false;
+    }
+
+    try {
+      const publicUiOrigin = new URL(
+        this.configService.getOrThrow<string>('AUTH_LOGIN_URL'),
+      ).origin;
+
+      return new URL(origin).origin === origin && origin === publicUiOrigin;
+    } catch {
+      return false;
+    }
+  }
+
+  buildPublicHomeUrl(notice?: PublicHomeNotice): string {
+    const homeUrl = new URL(
+      '/',
+      this.configService.getOrThrow<string>('AUTH_LOGIN_URL'),
+    );
+
+    if (notice) {
+      homeUrl.searchParams.set('session_notice', notice);
+    }
+
+    return homeUrl.toString();
   }
 
   private invalidReturnToException(): BadRequestException {

@@ -464,6 +464,7 @@ describe('AppController (e2e)', () => {
         expect(body.paths).toHaveProperty('/authorize');
         expect(body.paths).toHaveProperty('/token');
         expect(body.paths).toHaveProperty('/userinfo');
+        expect(body.paths).toHaveProperty('/auth/logout/browser');
         expect(body.paths).toHaveProperty('/admin/users');
         expect(body.paths).toHaveProperty(
           '/admin/applications/{applicationId}/rotate-secret',
@@ -475,7 +476,7 @@ describe('AppController (e2e)', () => {
         expect(body.components?.securitySchemes).toHaveProperty(
           'clientCredentials',
         );
-        expect(operationCount).toBe(33);
+        expect(operationCount).toBe(34);
         expect(
           body.components?.schemas?.['CreateUserDto']?.properties?.['password'],
         ).toMatchObject({ writeOnly: true });
@@ -708,6 +709,51 @@ describe('AppController (e2e)', () => {
     );
     expect(logoutResponse.headers['set-cookie']).toEqual(expect.any(Array));
     expect(persistedSession?.status).toBe('REVOKED');
+  });
+
+  it('lets a regular user perform SSO logout only from the public Auth Provider UI', async () => {
+    currentRole = 'USER';
+    const userAgent = request.agent(app.getHttpServer());
+
+    try {
+      await userAgent
+        .post('/auth/login')
+        .send({
+          email: activeUser.email,
+          password: 'correct-password',
+        })
+        .expect(200);
+
+      await userAgent
+        .post('/auth/logout/browser')
+        .set('Origin', 'http://attacker.example')
+        .expect(403)
+        .expect({
+          error: {
+            code: 'INVALID_LOGOUT_ORIGIN',
+            message:
+              'Permintaan logout tidak berasal dari halaman Auth Provider yang valid',
+          },
+        });
+
+      expect(persistedSession?.status).toBe('ACTIVE');
+      await userAgent.get('/auth/session').expect(200);
+
+      const logoutResponse = await userAgent
+        .post('/auth/logout/browser')
+        .set('Origin', 'http://localhost:3000')
+        .expect(303);
+
+      expect(logoutResponse.headers['location']).toBe(
+        'http://localhost:3000/?session_notice=sso_logged_out',
+      );
+      expect(logoutResponse.headers['cache-control']).toBe('no-store');
+      expect(logoutResponse.headers['set-cookie']).toEqual(expect.any(Array));
+      expect(persistedSession?.status).toBe('REVOKED');
+      await userAgent.get('/auth/session').expect(401);
+    } finally {
+      currentRole = 'ADMIN';
+    }
   });
 
   it('rejects /userinfo without a Bearer access token', () => {

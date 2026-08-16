@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -14,6 +15,7 @@ import {
   ApiBody,
   ApiConsumes,
   ApiCookieAuth,
+  ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
@@ -215,6 +217,48 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<void> {
     await this.clearCurrentSession(request, response);
+  }
+
+  @Post('logout/browser')
+  @ApiOperation({
+    summary: 'Perform SSO logout from the public Auth Provider page',
+  })
+  @ApiCookieAuth('centralSession')
+  @ApiResponse({
+    status: HttpStatus.SEE_OTHER,
+    description:
+      'The central session is revoked, its cookie cleared, and the browser redirected to the public Auth Provider page.',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'The request did not originate from the public Auth Provider UI.',
+  })
+  async logoutBrowser(
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    if (
+      !this.frontChannelLoginService.isPublicUiOrigin(request.get('origin'))
+    ) {
+      throw new ForbiddenException({
+        error: {
+          code: 'INVALID_LOGOUT_ORIGIN',
+          message:
+            'Permintaan logout tidak berasal dari halaman Auth Provider yang valid',
+        },
+      });
+    }
+
+    await this.clearCurrentSession(request, response);
+    response.set({
+      'Cache-Control': 'no-store',
+      Pragma: 'no-cache',
+      'Referrer-Policy': 'no-referrer',
+    });
+    response.redirect(
+      HttpStatus.SEE_OTHER,
+      this.frontChannelLoginService.buildPublicHomeUrl('sso_logged_out'),
+    );
   }
 
   @Post('logout/admin')
