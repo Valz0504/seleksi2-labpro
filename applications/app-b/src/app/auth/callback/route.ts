@@ -5,6 +5,7 @@ import {
   fetchUserInfo,
   readAuthorizationCode,
 } from '@/src/lib/auth/oauth-callback';
+import { writeLocalSessionCookie } from '@/src/lib/auth/local-session-cookie';
 import { issueLocalSession, recordCallbackFailure } from '@/src/lib/auth/local-session';
 import { readOAuthLoginTransaction } from '@/src/lib/auth/oauth-login';
 import type { RelyingApplicationConfig } from '@/src/lib/config/environment';
@@ -90,17 +91,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const response = NextResponse.redirect(config.launchUrl, 303);
 
     expireOAuthTransactionCookie(response, config);
-    response.cookies.set({
-      name: config.localSessionCookieName,
-      value: localSession.token,
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: config.localSessionCookieSecure,
-      path: '/',
-      maxAge: config.localSessionTtlSeconds,
-      expires: localSession.expiresAt,
-      priority: 'high',
-    });
+    writeLocalSessionCookie(response, config, localSession.token, localSession.expiresAt);
 
     return finalizeResponse(response);
   } catch {
