@@ -9,7 +9,7 @@
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "typecheck": "prisma generate && tsc --noEmit --incremental false",
-    "test": "tsx --test src/lib/config/environment.test.ts src/lib/database/environment.test.ts src/lib/auth/oauth-login.test.ts src/lib/auth/oauth-callback.test.ts src/lib/auth/session-token.test.ts src/lib/auth/local-session-state.test.ts",
+    "test": "tsx --test src/lib/config/environment.test.ts src/lib/database/environment.test.ts src/lib/auth/oauth-login.test.ts src/lib/auth/oauth-callback.test.ts src/lib/auth/session-token.test.ts src/lib/auth/local-session-state.test.ts src/lib/dashboard/view-model.test.ts",
     "database:generate": "prisma generate",
     "database:migrate": "prisma migrate deploy",
     "database:status": "prisma migrate status"
