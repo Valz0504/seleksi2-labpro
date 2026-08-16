@@ -17,6 +17,7 @@ const validEnvironment = {
   AUTH_SERVER_INTERNAL_URL: 'http://auth-server:3001',
   APP_A_CLIENT_ID: 'app-a',
   APP_A_CLIENT_SECRET: 'test-only-client-secret',
+  INTERNAL_SERVICE_SECRET: 'test-only-internal-service-secret',
   APP_A_REDIRECT_URI: 'http://localhost:3002/auth/callback',
   APP_A_LAUNCH_URL: 'http://localhost:3002',
 };
@@ -29,6 +30,7 @@ describe('validateRelyingApplicationEnvironment for App A', () => {
       applicationName: 'App A',
       clientId: 'app-a',
       clientSecret: 'test-only-client-secret',
+      internalServiceSecret: 'test-only-internal-service-secret',
       redirectUri: 'http://localhost:3002/auth/callback',
       launchUrl: 'http://localhost:3002/',
       authorizeUrl: 'http://localhost:3001/authorize',
@@ -69,6 +71,25 @@ describe('validateRelyingApplicationEnvironment for App A', () => {
           names,
         ),
       /APP_A_CLIENT_SECRET harus berisi 16-1024 karakter/,
+    );
+  });
+
+  it('requires an opaque internal service secret', () => {
+    assert.throws(
+      () =>
+        validateRelyingApplicationEnvironment(
+          { ...validEnvironment, INTERNAL_SERVICE_SECRET: 'short' },
+          names,
+        ),
+      /INTERNAL_SERVICE_SECRET harus berisi 16-1024 karakter/,
+    );
+    assert.throws(
+      () =>
+        validateRelyingApplicationEnvironment(
+          { ...validEnvironment, INTERNAL_SERVICE_SECRET: 'internal secret with spaces' },
+          names,
+        ),
+      /INTERNAL_SERVICE_SECRET harus berupa opaque secret tanpa whitespace/,
     );
   });
 

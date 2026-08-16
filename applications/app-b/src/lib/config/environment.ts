@@ -12,6 +12,7 @@ export interface RelyingApplicationConfig {
   applicationName: string;
   clientId: string;
   clientSecret: string;
+  internalServiceSecret: string;
   redirectUri: string;
   launchUrl: string;
   authorizeUrl: string;
@@ -154,6 +155,17 @@ export function validateRelyingApplicationEnvironment(
   }
 
   const clientSecret = requireBoundedString(environment, names.clientSecret, 16, 1024);
+  const internalServiceSecret = requireBoundedString(
+    environment,
+    'INTERNAL_SERVICE_SECRET',
+    16,
+    1024,
+  );
+
+  if (!/^[\x21-\x7e]+$/.test(internalServiceSecret)) {
+    throw new Error('INTERNAL_SERVICE_SECRET harus berupa opaque secret tanpa whitespace');
+  }
+
   const launchUrl = requireBaseHttpUrl(environment, names.launchUrl);
   const redirectUri = requireRedirectUri(environment, names.redirectUri, launchUrl);
   const publicAuthServerUrl = requireBaseHttpUrl(environment, 'AUTH_SERVER_PUBLIC_URL');
@@ -167,6 +179,7 @@ export function validateRelyingApplicationEnvironment(
     applicationName: names.applicationName,
     clientId,
     clientSecret,
+    internalServiceSecret,
     redirectUri: redirectUri.toString(),
     launchUrl: launchUrl.toString(),
     authorizeUrl: new URL('/authorize', publicAuthServerUrl).toString(),

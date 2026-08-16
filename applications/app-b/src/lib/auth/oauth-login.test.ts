@@ -12,6 +12,7 @@ const config: RelyingApplicationConfig = {
   applicationName: 'App B',
   clientId: 'app-b',
   clientSecret: 'test-only-client-secret',
+  internalServiceSecret: 'test-only-internal-service-secret',
   redirectUri: 'http://localhost:3003/auth/callback',
   launchUrl: 'http://localhost:3003/',
   authorizeUrl: 'http://localhost:3001/authorize',
