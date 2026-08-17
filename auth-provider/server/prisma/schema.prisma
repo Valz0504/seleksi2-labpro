@@ -9,6 +9,12 @@ generator client {
   moduleFormat = "cjs"
 }
 
+generator syncWorkerClient {
+  provider     = "prisma-client"
+  output       = "../../sync-worker/src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
 datasource db {
   provider = "postgresql"
 }
@@ -48,6 +54,19 @@ enum PkceCodeChallengeMethod {
   S256
 }
 
+enum OutboxEventStatus {
+  PENDING
+  PUBLISHED
+}
+
+enum EventDeliveryStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  RETRYING
+  FAILED
+}
+
 model User {
   id                String              @id @default(uuid()) @db.Uuid
   name              String
@@ -63,6 +82,7 @@ model User {
   accessTokens      AccessToken[]
   auditLogsAsActor  AuditLog[]          @relation("AuditLogActor")
   auditLogsAsTarget AuditLog[]          @relation("AuditLogTargetUser")
+  outboxEvents      OutboxEvent[]
 
   @@map("users")
 }
@@ -107,6 +127,8 @@ model Application {
   authCodes             AuthorizationCode[]
   accessTokens          AccessToken[]
   auditLogs             AuditLog[]
+  targetedOutboxEvents  OutboxEvent[]
+  eventDeliveries       EventDelivery[]
 
   @@map("applications")
 }
@@ -152,6 +174,7 @@ model SsoSession {
   authCodes        AuthorizationCode[]
   accessTokens     AccessToken[]
   auditLogs        AuditLog[]
+  outboxEvents     OutboxEvent[]
 
   @@index([userId, status])
   @@index([expiresAt])
@@ -222,4 +245,51 @@ model AuditLog {
   @@index([applicationId, createdAt])
   @@index([sessionId])
   @@map("audit_logs")
+}
+
+model OutboxEvent {
+  id                   String            @id @default(uuid()) @db.Uuid
+  eventType            String            @map("event_type") @db.VarChar(100)
+  userId               String            @map("user_id") @db.Uuid
+  centralSessionId     String?           @map("central_session_id") @db.Uuid
+  applicationId        String?           @map("application_id") @db.Uuid
+  payload              Json
+  status               OutboxEventStatus @default(PENDING)
+  publishAttemptCount  Int               @default(0) @map("publish_attempt_count")
+  lastPublishAttemptAt DateTime?         @map("last_publish_attempt_at")
+  nextPublishAttemptAt DateTime?         @map("next_publish_attempt_at")
+  lastError            String?           @map("last_error") @db.Text
+  createdAt            DateTime          @default(now()) @map("created_at")
+  publishedAt          DateTime?         @map("published_at")
+  user                 User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  centralSession       SsoSession?       @relation(fields: [centralSessionId], references: [id], onDelete: SetNull)
+  application          Application?      @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  deliveries           EventDelivery[]
+
+  @@index([status, nextPublishAttemptAt, createdAt])
+  @@index([userId, createdAt])
+  @@index([centralSessionId])
+  @@index([applicationId, createdAt])
+  @@map("events")
+}
+
+model EventDelivery {
+  id            String              @id @default(uuid()) @db.Uuid
+  eventId       String              @map("event_id") @db.Uuid
+  applicationId String              @map("application_id") @db.Uuid
+  status        EventDeliveryStatus @default(PENDING)
+  attemptCount  Int                 @default(0) @map("attempt_count")
+  lastAttemptAt DateTime?           @map("last_attempt_at")
+  nextRetryAt   DateTime?           @map("next_retry_at")
+  processedAt   DateTime?           @map("processed_at")
+  lastError     String?             @map("last_error") @db.Text
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+  event         OutboxEvent         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  application   Application         @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  @@unique([eventId, applicationId])
+  @@index([status, nextRetryAt])
+  @@index([applicationId, status])
+  @@map("event_deliveries")
 }
