@@ -7,6 +7,7 @@ describe('validateEnvironment', () => {
     AUTH_LOGIN_URL: 'http://localhost:3000/login',
     CONTROL_PANEL_ADMIN_LOGIN_URL: 'http://localhost:3000/admin/login',
     CONTROL_PANEL_ADMIN_DASHBOARD_URL: 'http://localhost:3000/admin',
+    RABBITMQ_URL: 'amqp://user:password@localhost:5672',
   };
 
   it('applies safe development defaults for session and OAuth lifetimes', () => {
@@ -16,6 +17,15 @@ describe('validateEnvironment', () => {
       SSO_SESSION_TTL_SECONDS: 28_800,
       AUTHORIZATION_CODE_TTL_SECONDS: 300,
       ACCESS_TOKEN_TTL_SECONDS: 900,
+      OUTBOX_PUBLISHER_ENABLED: true,
+      RABBITMQ_CONNECTION_TIMEOUT_MS: 5_000,
+      RABBITMQ_HEARTBEAT_SECONDS: 10,
+      RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_MS: 10_000,
+      OUTBOX_PUBLISH_INTERVAL_MS: 1_000,
+      OUTBOX_PUBLISH_BATCH_SIZE: 50,
+      OUTBOX_PUBLISH_LEASE_MS: 30_000,
+      OUTBOX_PUBLISH_RETRY_BASE_MS: 1_000,
+      OUTBOX_PUBLISH_RETRY_MAX_MS: 60_000,
       SWAGGER_ENABLED: true,
     });
   });
@@ -63,5 +73,48 @@ describe('validateEnvironment', () => {
         AUTH_LOGIN_URL: 'https://user:password@example.com/login',
       }),
     ).toThrow('AUTH_LOGIN_URL must be a valid HTTP(S) URL');
+  });
+
+  it('requires a valid AMQP URL while the outbox publisher is enabled', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        RABBITMQ_URL: 'https://localhost:15672',
+      }),
+    ).toThrow('RABBITMQ_URL must be a valid AMQP(S) URL');
+    expect(() => {
+      const withoutRabbitMq: Record<string, unknown> = {
+        ...validEnvironment,
+      };
+
+      delete withoutRabbitMq['RABBITMQ_URL'];
+
+      validateEnvironment(withoutRabbitMq);
+    }).toThrow('RABBITMQ_URL must be defined');
+  });
+
+  it('allows RabbitMQ to be omitted when the outbox publisher is disabled', () => {
+    const withoutRabbitMq: Record<string, unknown> = { ...validEnvironment };
+
+    delete withoutRabbitMq['RABBITMQ_URL'];
+
+    expect(
+      validateEnvironment({
+        ...withoutRabbitMq,
+        OUTBOX_PUBLISHER_ENABLED: 'false',
+      }),
+    ).toMatchObject({
+      OUTBOX_PUBLISHER_ENABLED: false,
+      RABBITMQ_URL: undefined,
+    });
+  });
+
+  it('rejects invalid outbox publisher numeric configuration', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        OUTBOX_PUBLISH_BATCH_SIZE: '0',
+      }),
+    ).toThrow('OUTBOX_PUBLISH_BATCH_SIZE must be a positive integer');
   });
 });

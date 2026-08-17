@@ -2,6 +2,14 @@ const DEFAULT_SSO_COOKIE_NAME = 'sso_session';
 const DEFAULT_SSO_SESSION_TTL_SECONDS = 8 * 60 * 60;
 const DEFAULT_AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
 const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
+const DEFAULT_OUTBOX_PUBLISH_INTERVAL_MS = 1_000;
+const DEFAULT_OUTBOX_PUBLISH_BATCH_SIZE = 50;
+const DEFAULT_OUTBOX_PUBLISH_LEASE_MS = 30_000;
+const DEFAULT_OUTBOX_PUBLISH_RETRY_BASE_MS = 1_000;
+const DEFAULT_OUTBOX_PUBLISH_RETRY_MAX_MS = 60_000;
+const DEFAULT_RABBITMQ_CONNECTION_TIMEOUT_MS = 5_000;
+const DEFAULT_RABBITMQ_HEARTBEAT_SECONDS = 10;
+const DEFAULT_RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_MS = 10_000;
 
 function requireHttpUrl(
   environment: Record<string, unknown>,
@@ -24,6 +32,29 @@ function requireHttpUrl(
     return url.toString();
   } catch {
     throw new Error(`${name} must be a valid HTTP(S) URL`);
+  }
+}
+
+function requireAmqpUrl(
+  environment: Record<string, unknown>,
+  name: string,
+): string {
+  const value = requireString(environment, name);
+
+  try {
+    const url = new URL(value);
+
+    if (
+      (url.protocol !== 'amqp:' && url.protocol !== 'amqps:') ||
+      url.hostname.length === 0 ||
+      url.hash !== ''
+    ) {
+      throw new Error();
+    }
+
+    return url.toString();
+  } catch {
+    throw new Error(`${name} must be a valid AMQP(S) URL`);
   }
 }
 
@@ -92,6 +123,14 @@ export function validateEnvironment(
     environment,
     'CONTROL_PANEL_ADMIN_DASHBOARD_URL',
   );
+  const outboxPublisherEnabled = parseBoolean(
+    environment['OUTBOX_PUBLISHER_ENABLED'],
+    'OUTBOX_PUBLISHER_ENABLED',
+    true,
+  );
+  const rabbitMqUrl = outboxPublisherEnabled
+    ? requireAmqpUrl(environment, 'RABBITMQ_URL')
+    : environment['RABBITMQ_URL'];
   const cookieName =
     typeof environment['SSO_COOKIE_NAME'] === 'string' &&
     environment['SSO_COOKIE_NAME'].length > 0
@@ -135,6 +174,48 @@ export function validateEnvironment(
       environment['ACCESS_TOKEN_TTL_SECONDS'],
       'ACCESS_TOKEN_TTL_SECONDS',
       DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
+    ),
+    OUTBOX_PUBLISHER_ENABLED: outboxPublisherEnabled,
+    RABBITMQ_URL: rabbitMqUrl,
+    RABBITMQ_CONNECTION_TIMEOUT_MS: parsePositiveInteger(
+      environment['RABBITMQ_CONNECTION_TIMEOUT_MS'],
+      'RABBITMQ_CONNECTION_TIMEOUT_MS',
+      DEFAULT_RABBITMQ_CONNECTION_TIMEOUT_MS,
+    ),
+    RABBITMQ_HEARTBEAT_SECONDS: parsePositiveInteger(
+      environment['RABBITMQ_HEARTBEAT_SECONDS'],
+      'RABBITMQ_HEARTBEAT_SECONDS',
+      DEFAULT_RABBITMQ_HEARTBEAT_SECONDS,
+    ),
+    RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_MS: parsePositiveInteger(
+      environment['RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_MS'],
+      'RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_MS',
+      DEFAULT_RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_MS,
+    ),
+    OUTBOX_PUBLISH_INTERVAL_MS: parsePositiveInteger(
+      environment['OUTBOX_PUBLISH_INTERVAL_MS'],
+      'OUTBOX_PUBLISH_INTERVAL_MS',
+      DEFAULT_OUTBOX_PUBLISH_INTERVAL_MS,
+    ),
+    OUTBOX_PUBLISH_BATCH_SIZE: parsePositiveInteger(
+      environment['OUTBOX_PUBLISH_BATCH_SIZE'],
+      'OUTBOX_PUBLISH_BATCH_SIZE',
+      DEFAULT_OUTBOX_PUBLISH_BATCH_SIZE,
+    ),
+    OUTBOX_PUBLISH_LEASE_MS: parsePositiveInteger(
+      environment['OUTBOX_PUBLISH_LEASE_MS'],
+      'OUTBOX_PUBLISH_LEASE_MS',
+      DEFAULT_OUTBOX_PUBLISH_LEASE_MS,
+    ),
+    OUTBOX_PUBLISH_RETRY_BASE_MS: parsePositiveInteger(
+      environment['OUTBOX_PUBLISH_RETRY_BASE_MS'],
+      'OUTBOX_PUBLISH_RETRY_BASE_MS',
+      DEFAULT_OUTBOX_PUBLISH_RETRY_BASE_MS,
+    ),
+    OUTBOX_PUBLISH_RETRY_MAX_MS: parsePositiveInteger(
+      environment['OUTBOX_PUBLISH_RETRY_MAX_MS'],
+      'OUTBOX_PUBLISH_RETRY_MAX_MS',
+      DEFAULT_OUTBOX_PUBLISH_RETRY_MAX_MS,
     ),
     SWAGGER_ENABLED: parseBoolean(
       environment['SWAGGER_ENABLED'],
