@@ -6,6 +6,7 @@ import {
 } from '../common/security/opaque-token';
 import { verifyPassword } from '../common/security/password';
 import { PrismaService } from '../database/prisma.service';
+import { OutboxEventService } from '../event-processing/outbox-event.service';
 
 const DUMMY_PASSWORD_HASH =
   '$argon2id$v=19$m=19456,p=1,t=2$XDyNdawOPXncbz5b8iOaqg$OyX7SkbwX0qefYtwDIdiOtu9qTpwjpZp9ggu78Jn6ZY';
@@ -51,6 +52,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly outboxEventService: OutboxEventService,
   ) {}
 
   async login(
@@ -271,6 +273,15 @@ export class AuthService {
           status: 'REVOKED',
           revokedAt: now,
         },
+      });
+      await this.outboxEventService.enqueue(transaction, {
+        eventType: 'SessionRevoked',
+        userId: session.userId,
+        centralSessionId: session.id,
+        applicationId: null,
+        reason: 'sso_logout',
+        occurredAt: now,
+        metadata: { source: 'auth_logout' },
       });
       await transaction.auditLog.create({
         data: {

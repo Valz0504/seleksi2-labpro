@@ -179,10 +179,9 @@ export class AdminUsersService {
       });
 
       if (input.status === 'INACTIVE') {
-        await this.revocationService.revokeUsers(
+        await this.revocationService.revokeUsersForDeactivation(
           transaction,
           [userId],
-          'user_deactivated',
           now,
         );
       }
@@ -230,10 +229,9 @@ export class AdminUsersService {
         data: { passwordHash },
         select: { id: true },
       });
-      await this.revocationService.revokeUsers(
+      await this.revocationService.revokeUsersForPasswordChange(
         transaction,
         [userId],
-        'password_changed',
         now,
       );
       await transaction.auditLog.create({

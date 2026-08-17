@@ -1,5 +1,6 @@
 import { verifyPassword } from '../common/security/password';
 import { PrismaService } from '../database/prisma.service';
+import { OutboxEventService } from '../event-processing/outbox-event.service';
 import type { AdminActor } from './admin-request';
 import { AdminRevocationService } from './admin-revocation.service';
 import { AdminUsersService } from './admin-users.service';
@@ -23,8 +24,9 @@ describe('AdminUsersService', () => {
   };
   const transaction = {
     user: { create: jest.fn(), update: jest.fn() },
-    ssoSession: { updateMany: jest.fn() },
+    ssoSession: { updateManyAndReturn: jest.fn() },
     accessToken: { updateMany: jest.fn() },
+    outboxEvent: { createMany: jest.fn() },
     auditLog: { create: jest.fn() },
   };
   const prisma = {
@@ -37,8 +39,14 @@ describe('AdminUsersService', () => {
     jest.clearAllMocks();
     transaction.user.create.mockResolvedValue(userRecord);
     transaction.user.update.mockResolvedValue(userRecord);
-    transaction.ssoSession.updateMany.mockResolvedValue({ count: 1 });
+    transaction.ssoSession.updateManyAndReturn.mockResolvedValue([
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        userId,
+      },
+    ]);
     transaction.accessToken.updateMany.mockResolvedValue({ count: 1 });
+    transaction.outboxEvent.createMany.mockResolvedValue({ count: 1 });
     transaction.auditLog.create.mockResolvedValue({});
     prisma.$transaction.mockImplementation(
       (callback: (value: typeof transaction) => Promise<unknown>) =>
@@ -46,7 +54,7 @@ describe('AdminUsersService', () => {
     );
     service = new AdminUsersService(
       prisma as unknown as PrismaService,
-      new AdminRevocationService(),
+      new AdminRevocationService(new OutboxEventService()),
     );
   });
 
@@ -94,7 +102,7 @@ describe('AdminUsersService', () => {
     const passwordUpdate = passwordUpdateCalls[0][0];
 
     expect(passwordUpdate.data.passwordHash).not.toBe('new-strong-password');
-    const sessionUpdateCalls = transaction.ssoSession.updateMany.mock
+    const sessionUpdateCalls = transaction.ssoSession.updateManyAndReturn.mock
       .calls as unknown as Array<
       [
         {
@@ -108,6 +116,21 @@ describe('AdminUsersService', () => {
       data: { status: 'REVOKED', revokeReason: 'password_changed' },
     });
     expect(transaction.accessToken.updateMany).toHaveBeenCalled();
+    expect(transaction.outboxEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          eventType: 'PasswordChanged',
+          userId,
+          centralSessionId: null,
+          applicationId: null,
+          payload: expect.objectContaining({
+            eventType: 'PasswordChanged',
+            userId,
+            reason: 'password_changed',
+          }) as unknown,
+        }),
+      ],
+    });
     const auditCalls = transaction.auditLog.create.mock
       .calls as unknown as Array<[{ data: { eventType: string } }]>;
     expect(auditCalls[0]?.[0].data.eventType).toBe('PasswordChanged');
@@ -122,8 +145,8 @@ describe('AdminUsersService', () => {
 
     await service.updateStatus(userId, { status: 'INACTIVE' }, actor);
 
-    const deactivateSessionCalls = transaction.ssoSession.updateMany.mock
-      .calls as unknown as Array<
+    const deactivateSessionCalls = transaction.ssoSession.updateManyAndReturn
+      .mock.calls as unknown as Array<
       [{ data: { status: string; revokeReason: string } }]
     >;
     expect(deactivateSessionCalls[0]?.[0].data).toMatchObject({
@@ -131,5 +154,38 @@ describe('AdminUsersService', () => {
       revokeReason: 'user_deactivated',
     });
     expect(transaction.accessToken.updateMany).toHaveBeenCalled();
+    expect(transaction.outboxEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          eventType: 'SessionRevoked',
+          userId,
+          centralSessionId: '22222222-2222-4222-8222-222222222222',
+          applicationId: null,
+          payload: expect.objectContaining({
+            eventType: 'SessionRevoked',
+            reason: 'user_deactivated',
+          }) as unknown,
+        }),
+      ],
+    });
+  });
+
+  it('propagates an outbox failure from the password-change transaction', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: userId });
+    transaction.outboxEvent.createMany.mockRejectedValue(
+      new Error('outbox unavailable'),
+    );
+
+    await expect(
+      service.updatePassword(
+        userId,
+        { password: 'new-strong-password' },
+        actor,
+      ),
+    ).rejects.toThrow('outbox unavailable');
+    expect(transaction.user.update).toHaveBeenCalled();
+    expect(transaction.ssoSession.updateManyAndReturn).toHaveBeenCalled();
+    expect(transaction.accessToken.updateMany).toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
   });
 });

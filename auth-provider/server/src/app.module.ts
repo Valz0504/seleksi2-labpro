@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { AuthorizationModule } from './authorization/authorization.module';
 import { validateEnvironment } from './config/environment';
 import { PrismaModule } from './database/prisma.module';
+import { EventProcessingModule } from './event-processing/event-processing.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { PrismaModule } from './database/prisma.module';
       validate: validateEnvironment,
     }),
     PrismaModule,
+    EventProcessingModule,
     AuthModule,
     AuthorizationModule,
     AdminModule,

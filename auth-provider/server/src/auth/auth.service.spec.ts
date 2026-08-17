@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { hashPassword } from '../common/security/password';
 import { PrismaService } from '../database/prisma.service';
+import { OutboxEventService } from '../event-processing/outbox-event.service';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
@@ -20,6 +21,9 @@ describe('AuthService', () => {
     },
     auditLog: {
       create: jest.fn(),
+    },
+    outboxEvent: {
+      createMany: jest.fn(),
     },
     $transaction: jest.fn(),
   };
@@ -39,6 +43,7 @@ describe('AuthService', () => {
     prisma.ssoSession.updateMany.mockResolvedValue({ count: 1 });
     prisma.accessToken.updateMany.mockResolvedValue({ count: 1 });
     prisma.auditLog.create.mockResolvedValue({});
+    prisma.outboxEvent.createMany.mockResolvedValue({ count: 1 });
     prisma.$transaction.mockImplementation(
       (callback: (transaction: typeof prisma) => Promise<unknown>) =>
         callback(prisma),
@@ -47,6 +52,7 @@ describe('AuthService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
+        OutboxEventService,
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: configService },
       ],
@@ -239,6 +245,52 @@ describe('AuthService', () => {
         ipAddress: '127.0.0.1',
       },
     });
+    const outboxCalls = prisma.outboxEvent.createMany.mock
+      .calls as unknown as Array<
+      [
+        {
+          data: Array<{
+            id: string;
+            eventType: string;
+            userId: string;
+            centralSessionId: string | null;
+            applicationId: string | null;
+            payload: {
+              eventId: string;
+              eventType: string;
+              userId: string;
+              centralSessionId: string | null;
+              applicationId: string | null;
+              reason: string;
+              occurredAt: string;
+              metadata: Record<string, unknown>;
+            };
+          }>;
+        },
+      ]
+    >;
+    const outboxRow = outboxCalls[0]?.[0].data[0];
+
+    expect(outboxRow?.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(typeof outboxRow?.payload.occurredAt).toBe('string');
+    expect(outboxRow).toMatchObject({
+      id: outboxRow?.id,
+      eventType: 'SessionRevoked',
+      userId: '11111111-1111-4111-8111-111111111111',
+      centralSessionId: '22222222-2222-4222-8222-222222222222',
+      applicationId: null,
+      payload: {
+        eventId: outboxRow?.id,
+        eventType: 'SessionRevoked',
+        userId: '11111111-1111-4111-8111-111111111111',
+        centralSessionId: '22222222-2222-4222-8222-222222222222',
+        applicationId: null,
+        reason: 'sso_logout',
+        occurredAt: outboxRow?.payload.occurredAt,
+        metadata: { source: 'auth_logout' },
+      },
+    });
+    expect(outboxRow?.payload.eventId).toBe(outboxRow?.id);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
@@ -253,5 +305,24 @@ describe('AuthService', () => {
 
     expect(prisma.accessToken.updateMany).not.toHaveBeenCalled();
     expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    expect(prisma.outboxEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it('propagates an outbox failure from the logout transaction', async () => {
+    prisma.ssoSession.findUnique.mockResolvedValue({
+      id: '22222222-2222-4222-8222-222222222222',
+      userId: '11111111-1111-4111-8111-111111111111',
+    });
+    prisma.outboxEvent.createMany.mockRejectedValue(
+      new Error('outbox unavailable'),
+    );
+
+    await expect(authService.logout('valid-session-token')).rejects.toThrow(
+      'outbox unavailable',
+    );
+    expect(prisma.ssoSession.updateMany).toHaveBeenCalled();
+    expect(prisma.accessToken.updateMany).toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 });

@@ -125,6 +125,9 @@ describe('AppController (e2e)', () => {
     auditLog: {
       create: jest.fn(),
     },
+    outboxEvent: {
+      createMany: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
   const findAuditEvent = (eventType: string) => {
@@ -147,6 +150,32 @@ describe('AppController (e2e)', () => {
       .find((event) => {
         return event.eventType === eventType;
       });
+  };
+  const findOutboxEvent = (eventType: string) => {
+    const calls = prisma.outboxEvent.createMany.mock.calls as unknown as Array<
+      [
+        {
+          data: Array<{
+            id: string;
+            eventType: string;
+            payload: {
+              eventId: string;
+              eventType: string;
+              userId: string;
+              centralSessionId: string | null;
+              applicationId: string | null;
+              reason: string;
+              occurredAt: string;
+              metadata: Record<string, unknown>;
+            };
+          }>;
+        },
+      ]
+    >;
+
+    return calls
+      .flatMap(([input]) => input.data)
+      .find((event) => event.eventType === eventType);
   };
 
   beforeAll(async () => {
@@ -392,6 +421,7 @@ describe('AppController (e2e)', () => {
       },
     );
     prisma.auditLog.create.mockResolvedValue({});
+    prisma.outboxEvent.createMany.mockResolvedValue({ count: 1 });
     prisma.$transaction.mockImplementation((input: unknown) => {
       if (typeof input === 'function') {
         return (input as (transaction: typeof prisma) => Promise<unknown>)(
@@ -962,6 +992,25 @@ describe('AppController (e2e)', () => {
       result: 'SUCCESS',
       metadata: { reason: 'sso_logout' },
     });
+    const outboxEvent = findOutboxEvent('SessionRevoked');
+
+    expect(outboxEvent?.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(typeof outboxEvent?.payload.occurredAt).toBe('string');
+    expect(outboxEvent).toMatchObject({
+      id: outboxEvent?.id,
+      eventType: 'SessionRevoked',
+      payload: {
+        eventId: outboxEvent?.id,
+        eventType: 'SessionRevoked',
+        userId: activeUser.id,
+        centralSessionId: persistedSession?.id,
+        applicationId: null,
+        reason: 'sso_logout',
+        occurredAt: outboxEvent?.payload.occurredAt,
+        metadata: { source: 'auth_logout' },
+      },
+    });
+    expect(outboxEvent?.payload.eventId).toBe(outboxEvent?.id);
 
     await agent.get('/auth/session').expect(401);
     await agent
