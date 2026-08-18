@@ -136,6 +136,7 @@ services:
       DATABASE_URL: postgresql://${PRIMARY_DB_USER}:${PRIMARY_DB_PASSWORD}@primary-db:5432/${PRIMARY_DB_NAME}
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
+      SYNC_WORKER_CONSUMER_ENABLED: ${SYNC_WORKER_CONSUMER_ENABLED:-true}
     depends_on:
       rabbitmq:
         condition: service_healthy
