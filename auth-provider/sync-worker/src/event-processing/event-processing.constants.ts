@@ -16,4 +16,8 @@ export const WORKER_RUNTIME = {
   prefetchCount: 10,
   reconnectDelayMs: 1_000,
   internalLogoutTimeoutMs: 5_000,
+  retryPollIntervalMs: 1_000,
+  retryBatchSize: 50,
+  processingLeaseMs: 30_000,
+  deadLetterConfirmTimeoutMs: 10_000,
 } as const;

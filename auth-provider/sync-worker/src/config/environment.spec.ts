@@ -10,6 +10,9 @@ describe('validateEnvironment', () => {
   it('applies safe worker defaults', () => {
     expect(validateEnvironment(validEnvironment)).toMatchObject({
       SYNC_WORKER_CONSUMER_ENABLED: true,
+      DELIVERY_RETRY_MAX_ATTEMPTS: 5,
+      DELIVERY_RETRY_BASE_MS: 1_000,
+      DELIVERY_RETRY_MAX_MS: 60_000,
       SYNC_WORKER_LOGOUT_HOST_OVERRIDE: undefined,
     });
   });
@@ -63,6 +66,22 @@ describe('validateEnvironment', () => {
     ).toThrow(
       'SYNC_WORKER_LOGOUT_HOST_OVERRIDE must be a hostname without scheme or port',
     );
+  });
+
+  it('rejects invalid retry limits and backoff ranges', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        DELIVERY_RETRY_MAX_ATTEMPTS: '0',
+      }),
+    ).toThrow('DELIVERY_RETRY_MAX_ATTEMPTS must be a positive integer');
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        DELIVERY_RETRY_BASE_MS: '2000',
+        DELIVERY_RETRY_MAX_MS: '1000',
+      }),
+    ).toThrow('DELIVERY_RETRY_BASE_MS must not exceed DELIVERY_RETRY_MAX_MS');
   });
 
   it('normalizes a host-development logout hostname override', () => {

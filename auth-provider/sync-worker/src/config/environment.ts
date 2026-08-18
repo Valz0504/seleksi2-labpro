@@ -51,6 +51,24 @@ function parseConsumerEnabled(value: unknown): boolean {
   throw new Error('SYNC_WORKER_CONSUMER_ENABLED must be either true or false');
 }
 
+function parsePositiveInteger(
+  value: unknown,
+  name: string,
+  fallback: number,
+): number {
+  if (value === undefined || value === '') {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  return parsed;
+}
+
 function parseOptionalHostname(value: unknown): string | undefined {
   if (value === undefined || value === '') {
     return undefined;
@@ -85,6 +103,16 @@ export function validateEnvironment(
   const internalServiceSecret = consumerEnabled
     ? requireString(environment, 'INTERNAL_SERVICE_SECRET')
     : environment['INTERNAL_SERVICE_SECRET'];
+  const retryBaseMs = parsePositiveInteger(
+    environment['DELIVERY_RETRY_BASE_MS'],
+    'DELIVERY_RETRY_BASE_MS',
+    1_000,
+  );
+  const retryMaxMs = parsePositiveInteger(
+    environment['DELIVERY_RETRY_MAX_MS'],
+    'DELIVERY_RETRY_MAX_MS',
+    60_000,
+  );
 
   if (
     consumerEnabled &&
@@ -98,12 +126,25 @@ export function validateEnvironment(
     );
   }
 
+  if (retryBaseMs > retryMaxMs) {
+    throw new Error(
+      'DELIVERY_RETRY_BASE_MS must not exceed DELIVERY_RETRY_MAX_MS',
+    );
+  }
+
   return {
     ...environment,
     DATABASE_URL: databaseUrl,
     RABBITMQ_URL: rabbitMqUrl,
     INTERNAL_SERVICE_SECRET: internalServiceSecret,
     SYNC_WORKER_CONSUMER_ENABLED: consumerEnabled,
+    DELIVERY_RETRY_MAX_ATTEMPTS: parsePositiveInteger(
+      environment['DELIVERY_RETRY_MAX_ATTEMPTS'],
+      'DELIVERY_RETRY_MAX_ATTEMPTS',
+      5,
+    ),
+    DELIVERY_RETRY_BASE_MS: retryBaseMs,
+    DELIVERY_RETRY_MAX_MS: retryMaxMs,
     SYNC_WORKER_LOGOUT_HOST_OVERRIDE: parseOptionalHostname(
       environment['SYNC_WORKER_LOGOUT_HOST_OVERRIDE'],
     ),
