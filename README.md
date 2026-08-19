@@ -315,3 +315,13 @@ Auth Provider menyediakan dua probe dengan semantik berbeda:
 
 - `GET /health/live` selalu mengembalikan `200` selama proses dan HTTP event loop masih merespons. Endpoint ini tidak mengakses database atau RabbitMQ.
 - `GET /health/ready` menjalankan query ringan `SELECT 1` ke Primary Database dan memeriksa queue melalui channel RabbitMQ. Response `200` diberikan jika keduanya tersedia; jika salah satu gagal, response menjadi `503` dengan status komponen yang aman.
+
+### B04 — Graceful Shutdown
+
+Auth Server dan Sync Worker menangani `SIGTERM`/`SIGINT` sebelum proses berhenti:
+
+- listener HTTP ditutup agar tidak menerima koneksi baru;
+- Auth Server menghentikan polling outbox dan menunggu request/publish aktif;
+- Sync Worker membatalkan consumer, menunggu message aktif, lalu mengembalikan message yang melewati timeout ke queue;
+- koneksi RabbitMQ dan database ditutup setelah drain;
+- timeout aplikasi default 10 detik, sedangkan Docker memberi grace period 15 detik.
