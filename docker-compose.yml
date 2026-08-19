@@ -68,6 +68,16 @@ services:
     environment:
       DATABASE_URL: postgresql://${PRIMARY_DB_USER}:${PRIMARY_DB_PASSWORD}@primary-db:5432/${PRIMARY_DB_NAME}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+      APP_A_CLIENT_ID: ${APP_A_CLIENT_ID}
+      APP_A_CLIENT_SECRET: ${APP_A_CLIENT_SECRET}
+      APP_A_REDIRECT_URI: ${APP_A_REDIRECT_URI}
+      APP_A_LAUNCH_URL: ${APP_A_LAUNCH_URL}
+      APP_A_LOGOUT_NOTIFICATION_URL: ${APP_A_LOGOUT_NOTIFICATION_URL}
+      APP_B_CLIENT_ID: ${APP_B_CLIENT_ID}
+      APP_B_CLIENT_SECRET: ${APP_B_CLIENT_SECRET}
+      APP_B_REDIRECT_URI: ${APP_B_REDIRECT_URI}
+      APP_B_LAUNCH_URL: ${APP_B_LAUNCH_URL}
+      APP_B_LOGOUT_NOTIFICATION_URL: ${APP_B_LOGOUT_NOTIFICATION_URL}
     depends_on:
       primary-db-migrate:
         condition: service_completed_successfully
@@ -82,9 +92,30 @@ services:
     environment:
       PORT: 3001
       DATABASE_URL: postgresql://${PRIMARY_DB_USER}:${PRIMARY_DB_PASSWORD}@primary-db:5432/${PRIMARY_DB_NAME}
+      AUTH_LOGIN_URL: ${AUTH_LOGIN_URL}
+      CONTROL_PANEL_ADMIN_LOGIN_URL: ${CONTROL_PANEL_ADMIN_LOGIN_URL}
+      CONTROL_PANEL_ADMIN_DASHBOARD_URL: ${CONTROL_PANEL_ADMIN_DASHBOARD_URL}
       SSO_COOKIE_SECRET: ${SSO_COOKIE_SECRET}
+      SSO_COOKIE_NAME: ${SSO_COOKIE_NAME}
+      SSO_COOKIE_SECURE: ${SSO_COOKIE_SECURE}
+      SSO_SESSION_TTL_SECONDS: ${SSO_SESSION_TTL_SECONDS}
+      AUTHORIZATION_CODE_TTL_SECONDS: ${AUTHORIZATION_CODE_TTL_SECONDS}
+      ACCESS_TOKEN_TTL_SECONDS: ${ACCESS_TOKEN_TTL_SECONDS}
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      OUTBOX_PUBLISHER_ENABLED: ${OUTBOX_PUBLISHER_ENABLED:-true}
+      RABBITMQ_CONNECTION_TIMEOUT_MS: ${RABBITMQ_CONNECTION_TIMEOUT_MS:-5000}
+      RABBITMQ_HEARTBEAT_SECONDS: ${RABBITMQ_HEARTBEAT_SECONDS:-10}
+      RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_MS: ${RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_MS:-10000}
+      OUTBOX_PUBLISH_INTERVAL_MS: ${OUTBOX_PUBLISH_INTERVAL_MS:-1000}
+      OUTBOX_PUBLISH_BATCH_SIZE: ${OUTBOX_PUBLISH_BATCH_SIZE:-50}
+      OUTBOX_PUBLISH_LEASE_MS: ${OUTBOX_PUBLISH_LEASE_MS:-30000}
+      OUTBOX_PUBLISH_RETRY_BASE_MS: ${OUTBOX_PUBLISH_RETRY_BASE_MS:-1000}
+      OUTBOX_PUBLISH_RETRY_MAX_MS: ${OUTBOX_PUBLISH_RETRY_MAX_MS:-60000}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-true}
     depends_on:
+      rabbitmq:
+        condition: service_healthy
       primary-db-seed:
         condition: service_completed_successfully
     healthcheck:
@@ -105,6 +136,10 @@ services:
       DATABASE_URL: postgresql://${PRIMARY_DB_USER}:${PRIMARY_DB_PASSWORD}@primary-db:5432/${PRIMARY_DB_NAME}
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
+      SYNC_WORKER_CONSUMER_ENABLED: ${SYNC_WORKER_CONSUMER_ENABLED:-true}
+      DELIVERY_RETRY_MAX_ATTEMPTS: ${DELIVERY_RETRY_MAX_ATTEMPTS:-5}
+      DELIVERY_RETRY_BASE_MS: ${DELIVERY_RETRY_BASE_MS:-1000}
+      DELIVERY_RETRY_MAX_MS: ${DELIVERY_RETRY_MAX_MS:-60000}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -126,6 +161,7 @@ services:
     environment:
       PORT: 3000
       AUTH_SERVER_INTERNAL_URL: http://auth-server:3001
+      AUTH_SERVER_PUBLIC_URL: ${AUTH_SERVER_PUBLIC_URL}
     depends_on:
       auth-server:
         condition: service_healthy
@@ -135,6 +171,18 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  app-a-db-migrate:
+    build:
+      context: .
+      dockerfile: applications/app-a/Dockerfile
+    command: ['pnpm', '--filter', 'app-a', 'database:migrate']
+    environment:
+      DATABASE_URL: postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@local-db:5432/app_a
+    depends_on:
+      local-db:
+        condition: service_healthy
+    restart: 'no'
 
   app-a:
     build:
@@ -146,18 +194,36 @@ services:
       PORT: 3002
       DATABASE_URL: postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@local-db:5432/app_a
       AUTH_SERVER_INTERNAL_URL: http://auth-server:3001
+      AUTH_SERVER_PUBLIC_URL: ${AUTH_SERVER_PUBLIC_URL}
+      APP_A_CLIENT_ID: ${APP_A_CLIENT_ID}
+      APP_A_CLIENT_SECRET: ${APP_A_CLIENT_SECRET}
+      APP_A_REDIRECT_URI: ${APP_A_REDIRECT_URI}
+      APP_A_LAUNCH_URL: ${APP_A_LAUNCH_URL}
+      LOCAL_SESSION_TTL_SECONDS: ${LOCAL_SESSION_TTL_SECONDS:-28800}
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
     depends_on:
       auth-server:
         condition: service_healthy
-      local-db:
-        condition: service_healthy
+      app-a-db-migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/api/health >/dev/null || exit 1']
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  app-b-db-migrate:
+    build:
+      context: .
+      dockerfile: applications/app-b/Dockerfile
+    command: ['pnpm', '--filter', 'app-b', 'database:migrate']
+    environment:
+      DATABASE_URL: postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@local-db:5432/app_b
+    depends_on:
+      local-db:
+        condition: service_healthy
+    restart: 'no'
 
   app-b:
     build:
@@ -169,12 +235,18 @@ services:
       PORT: 3003
       DATABASE_URL: postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@local-db:5432/app_b
       AUTH_SERVER_INTERNAL_URL: http://auth-server:3001
+      AUTH_SERVER_PUBLIC_URL: ${AUTH_SERVER_PUBLIC_URL}
+      APP_B_CLIENT_ID: ${APP_B_CLIENT_ID}
+      APP_B_CLIENT_SECRET: ${APP_B_CLIENT_SECRET}
+      APP_B_REDIRECT_URI: ${APP_B_REDIRECT_URI}
+      APP_B_LAUNCH_URL: ${APP_B_LAUNCH_URL}
+      LOCAL_SESSION_TTL_SECONDS: ${LOCAL_SESSION_TTL_SECONDS:-28800}
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
     depends_on:
       auth-server:
         condition: service_healthy
-      local-db:
-        condition: service_healthy
+      app-b-db-migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3003/api/health >/dev/null || exit 1']
       interval: 5s

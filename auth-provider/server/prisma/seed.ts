@@ -1,6 +1,7 @@
 import 'dotenv/config';
-import { randomBytes, scrypt } from 'node:crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { hashPassword } from '../src/common/security/password';
+import { hashSecret } from '../src/common/security/secret';
 import { PrismaClient } from '../src/generated/prisma/client';
 
 function requireEnvironmentVariable(name: string): string {
@@ -16,6 +17,31 @@ function requireEnvironmentVariable(name: string): string {
 const connectionString = requireEnvironmentVariable('DATABASE_URL');
 const adminPassword = requireEnvironmentVariable('SEED_ADMIN_PASSWORD');
 
+const relyingApplications = [
+  {
+    name: 'App A',
+    groupName: 'app-a-users',
+    clientId: requireEnvironmentVariable('APP_A_CLIENT_ID'),
+    clientSecret: requireEnvironmentVariable('APP_A_CLIENT_SECRET'),
+    redirectUri: requireEnvironmentVariable('APP_A_REDIRECT_URI'),
+    launchUrl: requireEnvironmentVariable('APP_A_LAUNCH_URL'),
+    logoutNotificationUrl: requireEnvironmentVariable(
+      'APP_A_LOGOUT_NOTIFICATION_URL',
+    ),
+  },
+  {
+    name: 'App B',
+    groupName: 'app-b-users',
+    clientId: requireEnvironmentVariable('APP_B_CLIENT_ID'),
+    clientSecret: requireEnvironmentVariable('APP_B_CLIENT_SECRET'),
+    redirectUri: requireEnvironmentVariable('APP_B_REDIRECT_URI'),
+    launchUrl: requireEnvironmentVariable('APP_B_LAUNCH_URL'),
+    logoutNotificationUrl: requireEnvironmentVariable(
+      'APP_B_LOGOUT_NOTIFICATION_URL',
+    ),
+  },
+] as const;
+
 const adapter = new PrismaPg({
   connectionString,
 });
@@ -24,48 +50,98 @@ const prisma = new PrismaClient({
   adapter,
 });
 
-function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16);
-
-  return new Promise((resolve, reject) => {
-    scrypt(password, salt, 64, { N: 16_384, r: 8, p: 1 }, (error, key) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-
-      resolve(
-        [
-          'scrypt',
-          '16384',
-          '8',
-          '1',
-          salt.toString('base64url'),
-          key.toString('base64url'),
-        ].join('$'),
-      );
-    });
-  });
-}
-
 async function main() {
   const email = 'admin@example.com';
   const existingAdmin = await prisma.user.findUnique({ where: { email } });
+  let adminId: string;
 
   if (!existingAdmin) {
-    await prisma.user.create({
+    const admin = await prisma.user.create({
       data: {
         name: 'Admin',
         email,
         passwordHash: await hashPassword(adminPassword),
         status: 'ACTIVE',
+        role: 'ADMIN',
       },
     });
-  } else if (existingAdmin.passwordHash === 'temporary-hash') {
-    await prisma.user.update({
+    adminId = admin.id;
+  } else {
+    const admin = await prisma.user.update({
       where: { email },
       data: {
-        passwordHash: await hashPassword(adminPassword),
+        role: 'ADMIN',
+        ...(!existingAdmin.passwordHash.startsWith('$argon2id$')
+          ? { passwordHash: await hashPassword(adminPassword) }
+          : {}),
+      },
+    });
+    adminId = admin.id;
+  }
+
+  for (const relyingApplication of relyingApplications) {
+    const group = await prisma.group.upsert({
+      where: { name: relyingApplication.groupName },
+      update: {},
+      create: {
+        name: relyingApplication.groupName,
+        description: `Users allowed to access ${relyingApplication.name}`,
+      },
+    });
+
+    const application = await prisma.application.upsert({
+      where: { clientId: relyingApplication.clientId },
+      update: {},
+      create: {
+        name: relyingApplication.name,
+        clientId: relyingApplication.clientId,
+        clientSecretHash: hashSecret(relyingApplication.clientSecret),
+        launchUrl: relyingApplication.launchUrl,
+        logoutNotificationUrl: relyingApplication.logoutNotificationUrl,
+      },
+    });
+
+    await prisma.userGroup.upsert({
+      where: {
+        userId_groupId: {
+          userId: adminId,
+          groupId: group.id,
+        },
+      },
+      update: {},
+      create: {
+        userId: adminId,
+        groupId: group.id,
+      },
+    });
+
+    await prisma.applicationRedirectUri.upsert({
+      where: {
+        applicationId_redirectUri: {
+          applicationId: application.id,
+          redirectUri: relyingApplication.redirectUri,
+        },
+      },
+      update: {},
+      create: {
+        applicationId: application.id,
+        redirectUri: relyingApplication.redirectUri,
+      },
+    });
+
+    await prisma.applicationGroupPolicy.upsert({
+      where: {
+        applicationId_groupId_effect: {
+          applicationId: application.id,
+          groupId: group.id,
+          effect: 'ALLOW',
+        },
+      },
+      update: {},
+      create: {
+        applicationId: application.id,
+        groupId: group.id,
+        effect: 'ALLOW',
       },
     });
   }

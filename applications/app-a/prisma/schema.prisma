@@ -1,0 +1,79 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum LocalSessionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+model ProfileCache {
+  externalUserId String         @id @map("external_user_id") @db.Uuid
+  name           String
+  email          String
+  groups         Json?
+  syncedAt       DateTime       @map("synced_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  localSessions  LocalSession[]
+  activityLogs   ActivityLog[]
+
+  @@map("profile_cache")
+}
+
+model LocalSession {
+  id               String             @id @default(uuid()) @db.Uuid
+  sessionTokenHash String             @unique @map("session_token_hash") @db.Char(64)
+  externalUserId   String             @map("external_user_id") @db.Uuid
+  centralSessionId String             @map("central_session_id") @db.Uuid
+  status           LocalSessionStatus @default(ACTIVE)
+  createdAt        DateTime           @default(now()) @map("created_at")
+  expiresAt        DateTime           @map("expires_at")
+  lastActivityAt   DateTime?          @map("last_activity_at")
+  revokedAt        DateTime?          @map("revoked_at")
+  revokeReason     String?            @map("revoke_reason")
+  profile          ProfileCache       @relation(fields: [externalUserId], references: [externalUserId])
+  activityLogs     ActivityLog[]
+
+  @@index([externalUserId, status])
+  @@index([centralSessionId, status])
+  @@index([expiresAt])
+  @@map("local_sessions")
+}
+
+model ActivityLog {
+  id             String        @id @default(uuid()) @db.Uuid
+  eventType      String        @map("event_type") @db.VarChar(100)
+  result         String        @db.VarChar(50)
+  message        String        @db.Text
+  externalUserId String?       @map("external_user_id") @db.Uuid
+  localSessionId String?       @map("local_session_id") @db.Uuid
+  requestId      String?       @map("request_id") @db.VarChar(100)
+  metadata       Json?
+  createdAt      DateTime      @default(now()) @map("created_at")
+  profile        ProfileCache? @relation(fields: [externalUserId], references: [externalUserId], onDelete: SetNull)
+  localSession   LocalSession? @relation(fields: [localSessionId], references: [id], onDelete: SetNull)
+
+  @@index([externalUserId, createdAt])
+  @@index([localSessionId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("activity_logs")
+}
+
+model ProcessedEvent {
+  eventId     String   @id @map("event_id") @db.Uuid
+  eventType   String   @map("event_type") @db.VarChar(100)
+  payloadHash String?  @map("payload_hash") @db.Char(64)
+  processedAt DateTime @default(now()) @map("processed_at")
+  result      String   @db.Text
+
+  @@index([processedAt])
+  @@map("processed_events")
+}
