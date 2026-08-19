@@ -1,11 +1,7 @@
 # Identity & Authorization Provider
 
-Sistem Single Sign-On yang terdiri dari Auth Provider, Control Panel Admin, dua relying application, RabbitMQ, dan Sync Worker untuk menyebarkan revocation session.
-
-## Identitas
-
-- Nama: Emilio Justin
-- NIM: 13524043
+- **Nama:** Emilio Justin
+- **NIM:** 13524043
 
 ## Cara menjalankan sistem
 
