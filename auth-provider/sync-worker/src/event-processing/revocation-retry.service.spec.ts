@@ -42,7 +42,8 @@ describe('RevocationRetryService', () => {
     expect(deliveryService.processDueRetries).toHaveBeenCalledTimes(2);
 
     finishCycle?.();
-    await service.onModuleDestroy();
+    service.stopPolling();
+    await service.waitForIdle();
   });
 
   it('does not start when the worker consumer is disabled', () => {

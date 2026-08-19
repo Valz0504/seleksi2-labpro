@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  OnApplicationBootstrap,
-  OnModuleDestroy,
-} from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as amqp from 'amqplib';
 import type { Channel, ChannelModel, Message } from 'amqplib';
@@ -18,18 +13,30 @@ import {
 import { RevocationDeliveryService } from './revocation-delivery.service';
 import { parseRevocationMessage } from './revocation-message';
 
+interface ActiveDelivery {
+  channel: Channel;
+  message: Message;
+  processing: Promise<void>;
+  settled: boolean;
+}
+
+export interface ConsumerShutdownResult {
+  drained: boolean;
+  requeued: number;
+}
+
 @Injectable()
-export class RabbitMqConsumerService
-  implements OnApplicationBootstrap, OnModuleDestroy
-{
+export class RabbitMqConsumerService implements OnApplicationBootstrap {
   private readonly logger = new Logger(RabbitMqConsumerService.name);
   private readonly enabled: boolean;
-  private readonly activeDeliveries = new Set<Promise<void>>();
+  private readonly activeDeliveries = new Set<ActiveDelivery>();
   private connection?: ChannelModel;
   private channel?: Channel;
   private connecting?: Promise<void>;
   private reconnectTimer?: NodeJS.Timeout;
+  private consumerTag?: string;
   private destroyed = false;
+  private shutdownPromise?: Promise<ConsumerShutdownResult>;
 
   constructor(
     private readonly deliveryService: RevocationDeliveryService,
@@ -49,39 +56,109 @@ export class RabbitMqConsumerService
     this.triggerConnection();
   }
 
-  async onModuleDestroy(): Promise<void> {
+  shutdown(timeoutMs: number): Promise<ConsumerShutdownResult> {
+    if (!this.shutdownPromise) {
+      this.shutdownPromise = this.performShutdown(timeoutMs);
+    }
+
+    return this.shutdownPromise;
+  }
+
+  private async performShutdown(
+    timeoutMs: number,
+  ): Promise<ConsumerShutdownResult> {
     this.destroyed = true;
+    const deadline = Date.now() + timeoutMs;
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
 
-    await this.connecting?.catch(() => undefined);
-    await Promise.allSettled(this.activeDeliveries);
+    if (this.connecting) {
+      await this.waitUntil(
+        this.connecting.catch(() => undefined),
+        deadline,
+      );
+    }
+
+    const channel = this.channel;
+    const consumerTag = this.consumerTag;
+
+    this.consumerTag = undefined;
+    if (channel && consumerTag) {
+      await this.waitUntil(
+        channel.cancel(consumerTag).catch((error: unknown) => {
+          this.logger.warn(
+            `Could not cancel RabbitMQ consumer cleanly: ${safeErrorMessage(error)}`,
+          );
+        }),
+        deadline,
+      );
+    }
+
+    const drained = await this.waitUntil(
+      Promise.allSettled(
+        [...this.activeDeliveries].map((delivery) => delivery.processing),
+      ),
+      deadline,
+    );
+    let requeued = 0;
+
+    if (!drained) {
+      for (const delivery of this.activeDeliveries) {
+        if (delivery.settled) {
+          continue;
+        }
+
+        delivery.settled = true;
+        try {
+          delivery.channel.nack(delivery.message, false, true);
+          requeued += 1;
+        } catch (error) {
+          this.logger.warn(
+            `Could not requeue an in-flight message during shutdown: ${safeErrorMessage(error)}`,
+          );
+        }
+      }
+    }
+
     await this.closeConnection();
+
+    return { drained, requeued };
   }
 
-  async processMessage(channel: Channel, message: Message): Promise<void> {
+  async processMessage(
+    channel: Channel,
+    message: Message,
+    activeDelivery?: ActiveDelivery,
+  ): Promise<void> {
     try {
       const event = parseRevocationMessage(message);
       await this.deliveryService.process(event);
 
-      channel.ack(message);
-      this.logger.log(`Event ${event.eventId} processed and acknowledged`);
+      if (this.settle(activeDelivery, () => channel.ack(message))) {
+        this.logger.log(`Event ${event.eventId} processed and acknowledged`);
+      }
     } catch (error) {
       if (error instanceof NonRetryableEventError) {
-        channel.nack(message, false, false);
-        this.logger.warn(
-          `Rejected non-retryable RabbitMQ message: ${safeErrorMessage(error)}`,
-        );
+        if (
+          this.settle(activeDelivery, () => channel.nack(message, false, false))
+        ) {
+          this.logger.warn(
+            `Rejected non-retryable RabbitMQ message: ${safeErrorMessage(error)}`,
+          );
+        }
         return;
       }
 
-      channel.nack(message, false, true);
-      this.logger.error(
-        `RabbitMQ message processing failed and was requeued: ${safeErrorMessage(error)}`,
-      );
+      if (
+        this.settle(activeDelivery, () => channel.nack(message, false, true))
+      ) {
+        this.logger.error(
+          `RabbitMQ message processing failed and was requeued: ${safeErrorMessage(error)}`,
+        );
+      }
     }
   }
 
@@ -127,6 +204,7 @@ export class RabbitMqConsumerService
       if (this.connection === connection) {
         this.connection = undefined;
         this.channel = undefined;
+        this.consumerTag = undefined;
         this.scheduleReconnect();
       }
     });
@@ -142,21 +220,29 @@ export class RabbitMqConsumerService
       channel.on('close', () => {
         if (this.channel === channel) {
           this.channel = undefined;
+          this.consumerTag = undefined;
           void connection.close().catch(() => undefined);
         }
       });
       await this.assertTopology(channel);
       await channel.prefetch(WORKER_RUNTIME.prefetchCount);
-      await channel.consume(
+      const consumer = await channel.consume(
         REVOCATION_MESSAGING.queue,
         (message) => {
           if (!message) {
             return;
           }
 
-          const processing = this.processMessage(channel, message);
+          const delivery = {
+            channel,
+            message,
+            processing: Promise.resolve(),
+            settled: false,
+          } satisfies ActiveDelivery;
+          const processing = this.processMessage(channel, message, delivery);
 
-          this.activeDeliveries.add(processing);
+          delivery.processing = processing;
+          this.activeDeliveries.add(delivery);
           void processing
             .catch((error: unknown) => {
               this.logger.error(
@@ -164,7 +250,7 @@ export class RabbitMqConsumerService
               );
             })
             .finally(() => {
-              this.activeDeliveries.delete(processing);
+              this.activeDeliveries.delete(delivery);
             });
         },
         { noAck: false },
@@ -178,6 +264,7 @@ export class RabbitMqConsumerService
 
       this.connection = connection;
       this.channel = channel;
+      this.consumerTag = consumer.consumerTag;
       this.logger.log(
         `Consuming ${REVOCATION_MESSAGING.queue} with prefetch ${WORKER_RUNTIME.prefetchCount}`,
       );
@@ -236,6 +323,7 @@ export class RabbitMqConsumerService
 
     this.channel = undefined;
     this.connection = undefined;
+    this.consumerTag = undefined;
 
     if (channel) {
       await channel.close().catch(() => undefined);
@@ -244,5 +332,46 @@ export class RabbitMqConsumerService
     if (connection) {
       await connection.close().catch(() => undefined);
     }
+  }
+
+  private settle(
+    activeDelivery: ActiveDelivery | undefined,
+    operation: () => void,
+  ): boolean {
+    if (activeDelivery?.settled) {
+      return false;
+    }
+
+    if (activeDelivery) {
+      activeDelivery.settled = true;
+    }
+    operation();
+    return true;
+  }
+
+  private async waitUntil(
+    work: Promise<unknown>,
+    deadline: number,
+  ): Promise<boolean> {
+    const remainingMs = Math.max(deadline - Date.now(), 0);
+
+    if (remainingMs === 0) {
+      return false;
+    }
+
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = await Promise.race([
+      work.then(() => false),
+      new Promise<true>((resolve) => {
+        timer = setTimeout(() => resolve(true), remainingMs);
+        timer.unref();
+      }),
+    ]);
+
+    if (timer) {
+      clearTimeout(timer);
+    }
+
+    return !timedOut;
   }
 }

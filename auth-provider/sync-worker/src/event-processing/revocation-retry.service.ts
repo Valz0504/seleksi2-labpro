@@ -1,18 +1,11 @@
-import {
-  Injectable,
-  Logger,
-  OnApplicationBootstrap,
-  OnModuleDestroy,
-} from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WORKER_RUNTIME } from './event-processing.constants';
 import { safeErrorMessage } from './event-processing.errors';
 import { RevocationDeliveryService } from './revocation-delivery.service';
 
 @Injectable()
-export class RevocationRetryService
-  implements OnApplicationBootstrap, OnModuleDestroy
-{
+export class RevocationRetryService implements OnApplicationBootstrap {
   private readonly logger = new Logger(RevocationRetryService.name);
   private readonly enabled: boolean;
   private timer?: NodeJS.Timeout;
@@ -40,11 +33,14 @@ export class RevocationRetryService
     this.triggerCycle();
   }
 
-  async onModuleDestroy(): Promise<void> {
+  stopPolling(): void {
     if (this.timer) {
       clearInterval(this.timer);
+      this.timer = undefined;
     }
+  }
 
+  async waitForIdle(): Promise<void> {
     await this.activeCycle?.catch(() => undefined);
   }
 

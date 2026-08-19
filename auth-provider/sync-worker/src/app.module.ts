@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { validateEnvironment } from './config/environment';
 import { PrismaModule } from './database/prisma.module';
 import { EventProcessingModule } from './event-processing/event-processing.module';
+import { ShutdownModule } from './shutdown/shutdown.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { EventProcessingModule } from './event-processing/event-processing.modul
     }),
     PrismaModule,
     EventProcessingModule,
+    ShutdownModule,
   ],
   controllers: [AppController],
   providers: [AppService],

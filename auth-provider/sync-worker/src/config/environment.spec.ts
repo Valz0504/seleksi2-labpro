@@ -13,6 +13,7 @@ describe('validateEnvironment', () => {
       DELIVERY_RETRY_MAX_ATTEMPTS: 5,
       DELIVERY_RETRY_BASE_MS: 1_000,
       DELIVERY_RETRY_MAX_MS: 60_000,
+      SHUTDOWN_TIMEOUT_MS: 10_000,
       SYNC_WORKER_LOGOUT_HOST_OVERRIDE: undefined,
     });
   });
@@ -82,6 +83,15 @@ describe('validateEnvironment', () => {
         DELIVERY_RETRY_MAX_MS: '1000',
       }),
     ).toThrow('DELIVERY_RETRY_BASE_MS must not exceed DELIVERY_RETRY_MAX_MS');
+  });
+
+  it('rejects an invalid graceful shutdown timeout', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        SHUTDOWN_TIMEOUT_MS: '0',
+      }),
+    ).toThrow('SHUTDOWN_TIMEOUT_MS must be a positive integer');
   });
 
   it('normalizes a host-development logout hostname override', () => {
