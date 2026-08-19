@@ -9,6 +9,7 @@ import { hashPassword } from './../src/common/security/password';
 import { hashSecret } from './../src/common/security/secret';
 import { PrismaService } from './../src/database/prisma.service';
 import { RabbitMqPublisherService } from './../src/event-processing/rabbitmq-publisher.service';
+import { ShutdownStateService } from './../src/shutdown/shutdown-state.service';
 
 describe('AppController (e2e)', () => {
   type OpenApiDocument = {
@@ -95,6 +96,7 @@ describe('AppController (e2e)', () => {
   });
   const prisma = {
     $queryRaw: jest.fn(),
+    $disconnect: jest.fn(),
     user: {
       findUnique: jest.fn(),
       findMany: jest.fn(),
@@ -134,6 +136,7 @@ describe('AppController (e2e)', () => {
   };
   const rabbitMqPublisher = {
     checkReadiness: jest.fn(),
+    close: jest.fn(),
   };
   const findAuditEvent = (eventType: string) => {
     const calls = prisma.auditLog.create.mock.calls as unknown as Array<
@@ -1086,6 +1089,30 @@ describe('AppController (e2e)', () => {
       .get('/userinfo')
       .set('Authorization', `Bearer ${rawAccessToken}`)
       .expect(401);
+  });
+
+  it('becomes not ready and rejects new business requests while draining', async () => {
+    app.get(ShutdownStateService).beginDraining();
+
+    await request(app.getHttpServer())
+      .get('/health/ready')
+      .expect(503)
+      .expect(({ body }: { body: Record<string, unknown> }) => {
+        expect(body).toMatchObject({
+          status: 'not_ready',
+          lifecycle: 'draining',
+        });
+      });
+
+    await request(app.getHttpServer())
+      .get('/')
+      .expect(503)
+      .expect({
+        error: {
+          code: 'SERVICE_SHUTTING_DOWN',
+          message: 'Layanan sedang berhenti',
+        },
+      });
   });
 
   afterAll(async () => {

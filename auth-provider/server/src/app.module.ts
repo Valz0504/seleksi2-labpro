@@ -9,6 +9,7 @@ import { validateEnvironment } from './config/environment';
 import { PrismaModule } from './database/prisma.module';
 import { EventProcessingModule } from './event-processing/event-processing.module';
 import { HealthModule } from './health/health.module';
+import { ShutdownModule } from './shutdown/shutdown.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { HealthModule } from './health/health.module';
     }),
     PrismaModule,
     EventProcessingModule,
+    ShutdownModule,
     HealthModule,
     AuthModule,
     AuthorizationModule,

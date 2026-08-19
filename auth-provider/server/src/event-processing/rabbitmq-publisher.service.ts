@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { RevocationEvent } from '@seleksi/shared';
 import * as amqp from 'amqplib';
@@ -38,7 +38,7 @@ export class RabbitMqPublishError extends Error {
 }
 
 @Injectable()
-export class RabbitMqPublisherService implements OnModuleDestroy {
+export class RabbitMqPublisherService {
   private readonly logger = new Logger(RabbitMqPublisherService.name);
   private readonly confirmTimeoutMs: number;
   private connection?: ChannelModel;
@@ -74,7 +74,7 @@ export class RabbitMqPublisherService implements OnModuleDestroy {
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
+  async close(): Promise<void> {
     this.destroyed = true;
 
     if (this.connecting) {

@@ -80,7 +80,7 @@ describe('RabbitMqPublisherService', () => {
   });
 
   afterEach(async () => {
-    await service.onModuleDestroy();
+    await service.close();
   });
 
   it('asserts durable topology and resolves only on publisher confirm', async () => {

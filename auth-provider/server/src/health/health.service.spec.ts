@@ -7,13 +7,21 @@ describe('HealthService', () => {
   const rabbitMqPublisher = {
     checkReadiness: jest.fn(),
   };
+  const shutdownState = {
+    isDraining: jest.fn(),
+  };
   let service: HealthService;
 
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.$queryRaw.mockResolvedValue([{ result: 1 }]);
     rabbitMqPublisher.checkReadiness.mockResolvedValue(undefined);
-    service = new HealthService(prisma as never, rabbitMqPublisher as never);
+    shutdownState.isDraining.mockReturnValue(false);
+    service = new HealthService(
+      prisma as never,
+      rabbitMqPublisher as never,
+      shutdownState as never,
+    );
   });
 
   afterEach(() => {
@@ -32,6 +40,20 @@ describe('HealthService', () => {
   it('reports ready when the database and RabbitMQ both respond', async () => {
     await expect(service.readiness()).resolves.toMatchObject({
       status: 'ready',
+      lifecycle: 'running',
+      dependencies: {
+        primaryDatabase: 'ok',
+        rabbitmq: 'ok',
+      },
+    });
+  });
+
+  it('reports not ready while the server is draining', async () => {
+    shutdownState.isDraining.mockReturnValue(true);
+
+    await expect(service.readiness()).resolves.toMatchObject({
+      status: 'not_ready',
+      lifecycle: 'draining',
       dependencies: {
         primaryDatabase: 'ok',
         rabbitmq: 'ok',

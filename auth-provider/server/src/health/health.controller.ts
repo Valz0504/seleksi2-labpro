@@ -20,6 +20,7 @@ const READINESS_SCHEMA = {
   example: {
     status: 'ready',
     service: 'auth-server',
+    lifecycle: 'running',
     dependencies: {
       primaryDatabase: 'ok',
       rabbitmq: 'ok',

@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  OnApplicationBootstrap,
-  OnModuleDestroy,
-} from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { RevocationEvent } from '@seleksi/shared';
 import { PrismaService } from '../database/prisma.service';
@@ -14,9 +9,7 @@ import {
 } from './rabbitmq-publisher.service';
 
 @Injectable()
-export class OutboxPublisherService
-  implements OnApplicationBootstrap, OnModuleDestroy
-{
+export class OutboxPublisherService implements OnApplicationBootstrap {
   private readonly logger = new Logger(OutboxPublisherService.name);
   private readonly enabled: boolean;
   private readonly intervalMs: number;
@@ -63,12 +56,14 @@ export class OutboxPublisherService
     this.triggerCycle();
   }
 
-  async onModuleDestroy(): Promise<void> {
+  stopPolling(): void {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;
     }
+  }
 
+  async waitForIdle(): Promise<void> {
     await this.activeCycle?.catch(() => undefined);
   }
 

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { RabbitMqPublisherService } from '../event-processing/rabbitmq-publisher.service';
+import { ShutdownStateService } from '../shutdown/shutdown-state.service';
 
 const DEPENDENCY_TIMEOUT_MS = 2_000;
 
@@ -15,6 +16,7 @@ export interface LivenessReport {
 export interface ReadinessReport {
   status: 'ready' | 'not_ready';
   service: 'auth-server';
+  lifecycle: 'running' | 'draining';
   dependencies: {
     primaryDatabase: DependencyStatus;
     rabbitmq: DependencyStatus;
@@ -27,6 +29,7 @@ export class HealthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly rabbitMqPublisher: RabbitMqPublisherService,
+    private readonly shutdownState: ShutdownStateService,
   ) {}
 
   liveness(): LivenessReport {
@@ -42,11 +45,15 @@ export class HealthService {
       this.checkDependency(() => this.prisma.$queryRaw`SELECT 1`),
       this.checkDependency(() => this.rabbitMqPublisher.checkReadiness()),
     ]);
+    const lifecycle = this.shutdownState.isDraining() ? 'draining' : 'running';
 
     return {
       status:
-        primaryDatabase === 'ok' && rabbitmq === 'ok' ? 'ready' : 'not_ready',
+        lifecycle === 'running' && primaryDatabase === 'ok' && rabbitmq === 'ok'
+          ? 'ready'
+          : 'not_ready',
       service: 'auth-server',
+      lifecycle,
       dependencies: {
         primaryDatabase,
         rabbitmq,

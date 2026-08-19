@@ -10,6 +10,7 @@ const DEFAULT_OUTBOX_PUBLISH_RETRY_MAX_MS = 60_000;
 const DEFAULT_RABBITMQ_CONNECTION_TIMEOUT_MS = 5_000;
 const DEFAULT_RABBITMQ_HEARTBEAT_SECONDS = 10;
 const DEFAULT_RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_MS = 10_000;
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 function requireHttpUrl(
   environment: Record<string, unknown>,
@@ -216,6 +217,11 @@ export function validateEnvironment(
       environment['OUTBOX_PUBLISH_RETRY_MAX_MS'],
       'OUTBOX_PUBLISH_RETRY_MAX_MS',
       DEFAULT_OUTBOX_PUBLISH_RETRY_MAX_MS,
+    ),
+    SHUTDOWN_TIMEOUT_MS: parsePositiveInteger(
+      environment['SHUTDOWN_TIMEOUT_MS'],
+      'SHUTDOWN_TIMEOUT_MS',
+      DEFAULT_SHUTDOWN_TIMEOUT_MS,
     ),
     SWAGGER_ENABLED: parseBoolean(
       environment['SWAGGER_ENABLED'],

@@ -26,6 +26,7 @@ describe('validateEnvironment', () => {
       OUTBOX_PUBLISH_LEASE_MS: 30_000,
       OUTBOX_PUBLISH_RETRY_BASE_MS: 1_000,
       OUTBOX_PUBLISH_RETRY_MAX_MS: 60_000,
+      SHUTDOWN_TIMEOUT_MS: 10_000,
       SWAGGER_ENABLED: true,
     });
   });
@@ -116,5 +117,14 @@ describe('validateEnvironment', () => {
         OUTBOX_PUBLISH_BATCH_SIZE: '0',
       }),
     ).toThrow('OUTBOX_PUBLISH_BATCH_SIZE must be a positive integer');
+  });
+
+  it('rejects an invalid graceful shutdown timeout', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        SHUTDOWN_TIMEOUT_MS: '0',
+      }),
+    ).toThrow('SHUTDOWN_TIMEOUT_MS must be a positive integer');
   });
 });
