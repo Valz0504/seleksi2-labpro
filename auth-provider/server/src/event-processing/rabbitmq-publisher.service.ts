@@ -63,6 +63,17 @@ export class RabbitMqPublisherService implements OnModuleDestroy {
     }
   }
 
+  async checkReadiness(): Promise<void> {
+    try {
+      const channel = await this.getChannel();
+
+      await channel.checkQueue(REVOCATION_MESSAGING.queue);
+    } catch (error) {
+      await this.resetConnection();
+      throw new RabbitMqPublishError(error);
+    }
+  }
+
   async onModuleDestroy(): Promise<void> {
     this.destroyed = true;
 

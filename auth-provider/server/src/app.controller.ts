@@ -21,24 +21,4 @@ export class AppController {
       message: 'Auth Provider Server is running',
     };
   }
-
-  @Get('health')
-  @ApiOperation({ summary: 'Check Auth Provider health' })
-  @ApiOkResponse({
-    description: 'The synchronous Auth Provider process is healthy.',
-    schema: {
-      example: {
-        status: 'ok',
-        service: 'auth-server',
-        timestamp: '2026-08-15T08:00:00.000Z',
-      },
-    },
-  })
-  health() {
-    return {
-      status: 'ok',
-      service: 'auth-server',
-      timestamp: new Date().toISOString(),
-    };
-  }
 }

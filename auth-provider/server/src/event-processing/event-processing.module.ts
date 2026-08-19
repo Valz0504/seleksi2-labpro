@@ -10,6 +10,6 @@ import { RabbitMqPublisherService } from './rabbitmq-publisher.service';
     RabbitMqPublisherService,
     OutboxPublisherService,
   ],
-  exports: [OutboxEventService],
+  exports: [OutboxEventService, RabbitMqPublisherService],
 })
 export class EventProcessingModule {}

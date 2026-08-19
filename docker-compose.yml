@@ -119,7 +119,7 @@ services:
       primary-db-seed:
         condition: service_completed_successfully
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health >/dev/null || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health/ready >/dev/null || exit 1']
       interval: 5s
       timeout: 5s
       retries: 10

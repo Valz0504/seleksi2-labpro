@@ -8,6 +8,7 @@ import { configureApp } from './../src/app.setup';
 import { hashPassword } from './../src/common/security/password';
 import { hashSecret } from './../src/common/security/secret';
 import { PrismaService } from './../src/database/prisma.service';
+import { RabbitMqPublisherService } from './../src/event-processing/rabbitmq-publisher.service';
 
 describe('AppController (e2e)', () => {
   type OpenApiDocument = {
@@ -93,6 +94,7 @@ describe('AppController (e2e)', () => {
     userGroups: [],
   });
   const prisma = {
+    $queryRaw: jest.fn(),
     user: {
       findUnique: jest.fn(),
       findMany: jest.fn(),
@@ -129,6 +131,9 @@ describe('AppController (e2e)', () => {
       createMany: jest.fn(),
     },
     $transaction: jest.fn(),
+  };
+  const rabbitMqPublisher = {
+    checkReadiness: jest.fn(),
   };
   const findAuditEvent = (eventType: string) => {
     const calls = prisma.auditLog.create.mock.calls as unknown as Array<
@@ -179,6 +184,8 @@ describe('AppController (e2e)', () => {
   };
 
   beforeAll(async () => {
+    prisma.$queryRaw.mockResolvedValue([{ result: 1 }]);
+    rabbitMqPublisher.checkReadiness.mockResolvedValue(undefined);
     activeUser.passwordHash = await hashPassword('correct-password');
     prisma.user.findUnique.mockImplementation(
       ({ where }: { where: { email: string } }) =>
@@ -437,6 +444,8 @@ describe('AppController (e2e)', () => {
     })
       .overrideProvider(PrismaService)
       .useValue(prisma)
+      .overrideProvider(RabbitMqPublisherService)
+      .useValue(rabbitMqPublisher)
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -462,6 +471,64 @@ describe('AppController (e2e)', () => {
           service: 'auth-server',
         });
         expect(body.timestamp).toEqual(expect.any(String));
+      });
+  });
+
+  it('GET /health/live checks only that the process responds', () => {
+    return request(app.getHttpServer())
+      .get('/health/live')
+      .expect(200)
+      .expect(({ body }: { body: Record<string, unknown> }) => {
+        expect(body).toMatchObject({
+          status: 'ok',
+          service: 'auth-server',
+        });
+        expect(prisma.$queryRaw).not.toHaveBeenCalled();
+        expect(rabbitMqPublisher.checkReadiness).not.toHaveBeenCalled();
+      });
+  });
+
+  it('GET /health/ready reports dependency failures and recovers without restart', async () => {
+    prisma.$queryRaw.mockRejectedValueOnce(new Error('database secret detail'));
+    rabbitMqPublisher.checkReadiness.mockRejectedValueOnce(
+      new Error('amqp://user:secret@rabbitmq:5672'),
+    );
+
+    await request(app.getHttpServer())
+      .get('/health/live')
+      .expect(200)
+      .expect(({ body }: { body: Record<string, unknown> }) => {
+        expect(body.status).toBe('ok');
+      });
+
+    await request(app.getHttpServer())
+      .get('/health/ready')
+      .expect(503)
+      .expect(({ body }: { body: Record<string, unknown> }) => {
+        expect(body).toMatchObject({
+          status: 'not_ready',
+          service: 'auth-server',
+          dependencies: {
+            primaryDatabase: 'unavailable',
+            rabbitmq: 'unavailable',
+          },
+        });
+        expect(JSON.stringify(body)).not.toContain('database secret detail');
+        expect(JSON.stringify(body)).not.toContain('secret@rabbitmq');
+      });
+
+    await request(app.getHttpServer())
+      .get('/health/ready')
+      .expect(200)
+      .expect(({ body }: { body: Record<string, unknown> }) => {
+        expect(body).toMatchObject({
+          status: 'ready',
+          service: 'auth-server',
+          dependencies: {
+            primaryDatabase: 'ok',
+            rabbitmq: 'ok',
+          },
+        });
       });
   });
 
@@ -495,6 +562,8 @@ describe('AppController (e2e)', () => {
         expect(body.paths).toHaveProperty('/token');
         expect(body.paths).toHaveProperty('/userinfo');
         expect(body.paths).toHaveProperty('/auth/logout/browser');
+        expect(body.paths).toHaveProperty('/health/live');
+        expect(body.paths).toHaveProperty('/health/ready');
         expect(body.paths).toHaveProperty('/admin/users');
         expect(body.paths).toHaveProperty(
           '/admin/applications/{applicationId}/rotate-secret',
@@ -506,7 +575,7 @@ describe('AppController (e2e)', () => {
         expect(body.components?.securitySchemes).toHaveProperty(
           'clientCredentials',
         );
-        expect(operationCount).toBe(34);
+        expect(operationCount).toBe(36);
         expect(
           body.components?.schemas?.['CreateUserDto']?.properties?.['password'],
         ).toMatchObject({ writeOnly: true });
