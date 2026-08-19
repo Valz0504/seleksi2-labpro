@@ -81,6 +81,8 @@ Command tersebut mempertahankan data pada Docker volume.
 
 - Control Panel: <http://localhost:3000>
 - Auth Provider: <http://localhost:3001>
+- Auth Provider liveness: <http://localhost:3001/health/live>
+- Auth Provider readiness: <http://localhost:3001/health/ready>
 - Swagger Auth Provider: <http://localhost:3001/docs>
 - App A: <http://localhost:3002>
 - App B: <http://localhost:3003>
@@ -207,7 +209,9 @@ Penghapusan relasi akses memicu evaluasi ulang policy. Session hanya dicabut ket
 Endpoint dasar:
 
 - `GET /` — informasi service;
-- `GET /health` — health check Auth Provider;
+- `GET /health` — compatibility health check dengan semantik liveness;
+- `GET /health/live` — memastikan proses Auth Provider masih merespons tanpa memeriksa dependency;
+- `GET /health/ready` — memeriksa koneksi Primary Database dan RabbitMQ;
 - `GET /docs` — antarmuka Swagger/OpenAPI;
 - `GET /docs-json` — dokumen OpenAPI dalam format JSON;
 - `GET /docs-yaml` — dokumen OpenAPI dalam format YAML.
@@ -303,3 +307,11 @@ Mutasi pada Control Panel dilakukan melalui Next.js Server Actions dari halaman 
 - `GET /` — informasi service;
 - `GET /health` — health check Sync Worker.
 
+## Bonus yang Dikerjakan
+
+### B03 — Liveness dan Readiness Probe
+
+Auth Provider menyediakan dua probe dengan semantik berbeda:
+
+- `GET /health/live` selalu mengembalikan `200` selama proses dan HTTP event loop masih merespons. Endpoint ini tidak mengakses database atau RabbitMQ.
+- `GET /health/ready` menjalankan query ringan `SELECT 1` ke Primary Database dan memeriksa queue melalui channel RabbitMQ. Response `200` diberikan jika keduanya tersedia; jika salah satu gagal, response menjadi `503` dengan status komponen yang aman.
