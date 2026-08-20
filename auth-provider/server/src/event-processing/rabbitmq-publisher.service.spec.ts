@@ -147,6 +147,25 @@ describe('RabbitMqPublisherService', () => {
     expect(amqp.connect).toHaveBeenCalledTimes(1);
   });
 
+  it('reads actual main and dead-letter queue state from RabbitMQ', async () => {
+    channel.checkQueue
+      .mockResolvedValueOnce({ messageCount: 4, consumerCount: 1 })
+      .mockResolvedValueOnce({ messageCount: 2, consumerCount: 0 });
+
+    await expect(service.getQueueMetrics()).resolves.toEqual({
+      main: { messagesReady: 4, consumers: 1 },
+      deadLetter: { messagesReady: 2 },
+    });
+    expect(channel.checkQueue).toHaveBeenNthCalledWith(
+      1,
+      REVOCATION_MESSAGING.queue,
+    );
+    expect(channel.checkQueue).toHaveBeenNthCalledWith(
+      2,
+      REVOCATION_MESSAGING.deadLetterQueue,
+    );
+  });
+
   it('resets a failed readiness channel so the next probe can reconnect', async () => {
     channel.checkQueue.mockRejectedValueOnce(new Error('broker unavailable'));
 

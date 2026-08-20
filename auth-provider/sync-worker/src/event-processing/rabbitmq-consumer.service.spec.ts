@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import type { Channel, Message } from 'amqplib';
 import { RabbitMqConsumerService } from './rabbitmq-consumer.service';
 import { NonRetryableEventError } from './event-processing.errors';
+import { REVOCATION_MESSAGING } from './event-processing.constants';
 
 describe('RabbitMqConsumerService', () => {
   const event = {
@@ -26,6 +27,7 @@ describe('RabbitMqConsumerService', () => {
     ack: jest.fn(),
     nack: jest.fn(),
     cancel: jest.fn(),
+    checkQueue: jest.fn(),
     close: jest.fn(),
   };
   const connection = {
@@ -33,6 +35,9 @@ describe('RabbitMqConsumerService', () => {
   };
   const deliveryService = {
     process: jest.fn(),
+  };
+  const metrics = {
+    recordMessage: jest.fn(),
   };
   const config: Record<string, boolean> = {
     SYNC_WORKER_CONSUMER_ENABLED: true,
@@ -49,10 +54,14 @@ describe('RabbitMqConsumerService', () => {
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     deliveryService.process.mockResolvedValue(undefined);
     channel.cancel.mockResolvedValue(undefined);
+    channel.checkQueue
+      .mockResolvedValueOnce({ messageCount: 2, consumerCount: 1 })
+      .mockResolvedValueOnce({ messageCount: 3, consumerCount: 0 });
     channel.close.mockResolvedValue(undefined);
     connection.close.mockResolvedValue(undefined);
     service = new RabbitMqConsumerService(
       deliveryService as never,
+      metrics as never,
       configService as never,
     );
   });
@@ -85,6 +94,10 @@ describe('RabbitMqConsumerService', () => {
 
     expect(channel.ack).toHaveBeenCalledWith(message);
     expect(channel.nack).not.toHaveBeenCalled();
+    expect(metrics.recordMessage).toHaveBeenCalledWith(
+      'ack',
+      expect.any(Number),
+    );
   });
 
   it('dead-letters invalid or permanently inconsistent events', async () => {
@@ -96,6 +109,10 @@ describe('RabbitMqConsumerService', () => {
 
     expect(channel.nack).toHaveBeenCalledWith(message, false, false);
     expect(channel.ack).not.toHaveBeenCalled();
+    expect(metrics.recordMessage).toHaveBeenCalledWith(
+      'dead_letter',
+      expect.any(Number),
+    );
   });
 
   it('requeues infrastructure failures without acknowledging them', async () => {
@@ -107,6 +124,29 @@ describe('RabbitMqConsumerService', () => {
 
     expect(channel.nack).toHaveBeenCalledWith(message, false, true);
     expect(channel.ack).not.toHaveBeenCalled();
+    expect(metrics.recordMessage).toHaveBeenCalledWith(
+      'requeue',
+      expect.any(Number),
+    );
+  });
+
+  it('reads actual main and dead-letter queue state from RabbitMQ', async () => {
+    const internals = service as unknown as { channel: Channel };
+
+    internals.channel = channel as unknown as Channel;
+
+    await expect(service.getQueueMetrics()).resolves.toEqual({
+      main: { messagesReady: 2, consumers: 1 },
+      deadLetter: { messagesReady: 3, consumers: 0 },
+    });
+    expect(channel.checkQueue).toHaveBeenNthCalledWith(
+      1,
+      REVOCATION_MESSAGING.queue,
+    );
+    expect(channel.checkQueue).toHaveBeenNthCalledWith(
+      2,
+      REVOCATION_MESSAGING.deadLetterQueue,
+    );
   });
 
   it('cancels consumption and lets an in-flight delivery finish before closing', async () => {
@@ -122,6 +162,7 @@ describe('RabbitMqConsumerService', () => {
       message,
       processing: Promise.resolve(),
       settled: false,
+      startedAt: process.hrtime.bigint(),
     };
     delivery.processing = service.processMessage(
       channel as unknown as Channel,
@@ -168,6 +209,7 @@ describe('RabbitMqConsumerService', () => {
       message,
       processing: Promise.resolve(),
       settled: false,
+      startedAt: process.hrtime.bigint(),
     };
     delivery.processing = service.processMessage(
       channel as unknown as Channel,

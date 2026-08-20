@@ -12,17 +12,24 @@ import {
 } from './event-processing.errors';
 import { RevocationDeliveryService } from './revocation-delivery.service';
 import { parseRevocationMessage } from './revocation-message';
+import { WorkerMetricsService } from '../metrics/worker-metrics.service';
 
 interface ActiveDelivery {
   channel: Channel;
   message: Message;
   processing: Promise<void>;
   settled: boolean;
+  startedAt: bigint;
 }
 
 export interface ConsumerShutdownResult {
   drained: boolean;
   requeued: number;
+}
+
+export interface RabbitMqQueueMetrics {
+  main: { messagesReady: number; consumers: number };
+  deadLetter: { messagesReady: number; consumers: number };
 }
 
 @Injectable()
@@ -40,6 +47,7 @@ export class RabbitMqConsumerService implements OnApplicationBootstrap {
 
   constructor(
     private readonly deliveryService: RevocationDeliveryService,
+    private readonly metrics: WorkerMetricsService,
     private readonly configService: ConfigService,
   ) {
     this.enabled = configService.getOrThrow<boolean>(
@@ -62,6 +70,34 @@ export class RabbitMqConsumerService implements OnApplicationBootstrap {
     }
 
     return this.shutdownPromise;
+  }
+
+  async getQueueMetrics(): Promise<RabbitMqQueueMetrics> {
+    const channel = this.channel;
+
+    if (!channel) {
+      throw new Error('RabbitMQ consumer is not connected');
+    }
+
+    const [main, deadLetter] = await Promise.all([
+      channel.checkQueue(REVOCATION_MESSAGING.queue),
+      channel.checkQueue(REVOCATION_MESSAGING.deadLetterQueue),
+    ]);
+
+    return {
+      main: {
+        messagesReady: main.messageCount,
+        consumers: main.consumerCount,
+      },
+      deadLetter: {
+        messagesReady: deadLetter.messageCount,
+        consumers: deadLetter.consumerCount,
+      },
+    };
+  }
+
+  inFlightCount(): number {
+    return this.activeDeliveries.size;
   }
 
   private async performShutdown(
@@ -114,6 +150,10 @@ export class RabbitMqConsumerService implements OnApplicationBootstrap {
         delivery.settled = true;
         try {
           delivery.channel.nack(delivery.message, false, true);
+          this.metrics.recordMessage(
+            'requeue',
+            this.elapsedSeconds(delivery.startedAt),
+          );
           requeued += 1;
         } catch (error) {
           this.logger.warn(
@@ -133,11 +173,14 @@ export class RabbitMqConsumerService implements OnApplicationBootstrap {
     message: Message,
     activeDelivery?: ActiveDelivery,
   ): Promise<void> {
+    const startedAt = activeDelivery?.startedAt ?? process.hrtime.bigint();
+
     try {
       const event = parseRevocationMessage(message);
       await this.deliveryService.process(event);
 
       if (this.settle(activeDelivery, () => channel.ack(message))) {
+        this.metrics.recordMessage('ack', this.elapsedSeconds(startedAt));
         this.logger.log(`Event ${event.eventId} processed and acknowledged`);
       }
     } catch (error) {
@@ -145,6 +188,10 @@ export class RabbitMqConsumerService implements OnApplicationBootstrap {
         if (
           this.settle(activeDelivery, () => channel.nack(message, false, false))
         ) {
+          this.metrics.recordMessage(
+            'dead_letter',
+            this.elapsedSeconds(startedAt),
+          );
           this.logger.warn(
             `Rejected non-retryable RabbitMQ message: ${safeErrorMessage(error)}`,
           );
@@ -155,6 +202,7 @@ export class RabbitMqConsumerService implements OnApplicationBootstrap {
       if (
         this.settle(activeDelivery, () => channel.nack(message, false, true))
       ) {
+        this.metrics.recordMessage('requeue', this.elapsedSeconds(startedAt));
         this.logger.error(
           `RabbitMQ message processing failed and was requeued: ${safeErrorMessage(error)}`,
         );
@@ -238,6 +286,7 @@ export class RabbitMqConsumerService implements OnApplicationBootstrap {
             message,
             processing: Promise.resolve(),
             settled: false,
+            startedAt: process.hrtime.bigint(),
           } satisfies ActiveDelivery;
           const processing = this.processMessage(channel, message, delivery);
 
@@ -373,5 +422,9 @@ export class RabbitMqConsumerService implements OnApplicationBootstrap {
     }
 
     return !timedOut;
+  }
+
+  private elapsedSeconds(startedAt: bigint): number {
+    return Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
   }
 }

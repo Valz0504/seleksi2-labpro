@@ -37,6 +37,16 @@ export class RabbitMqPublishError extends Error {
   }
 }
 
+export interface RabbitMqQueueMetrics {
+  main: {
+    messagesReady: number;
+    consumers: number;
+  };
+  deadLetter: {
+    messagesReady: number;
+  };
+}
+
 @Injectable()
 export class RabbitMqPublisherService {
   private readonly logger = new Logger(RabbitMqPublisherService.name);
@@ -68,6 +78,29 @@ export class RabbitMqPublisherService {
       const channel = await this.getChannel();
 
       await channel.checkQueue(REVOCATION_MESSAGING.queue);
+    } catch (error) {
+      await this.resetConnection();
+      throw new RabbitMqPublishError(error);
+    }
+  }
+
+  async getQueueMetrics(): Promise<RabbitMqQueueMetrics> {
+    try {
+      const channel = await this.getChannel();
+      const [main, deadLetter] = await Promise.all([
+        channel.checkQueue(REVOCATION_MESSAGING.queue),
+        channel.checkQueue(REVOCATION_MESSAGING.deadLetterQueue),
+      ]);
+
+      return {
+        main: {
+          messagesReady: main.messageCount,
+          consumers: main.consumerCount,
+        },
+        deadLetter: {
+          messagesReady: deadLetter.messageCount,
+        },
+      };
     } catch (error) {
       await this.resetConnection();
       throw new RabbitMqPublishError(error);
