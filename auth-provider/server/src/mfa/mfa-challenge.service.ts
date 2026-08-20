@@ -12,6 +12,7 @@ import {
 } from '../common/security/opaque-token';
 import { PrismaService } from '../database/prisma.service';
 import { MfaSecretCryptoService } from './mfa-secret-crypto.service';
+import { MfaRecoveryCodeService } from './mfa-recovery-code.service';
 import { TotpService } from './totp.service';
 
 export type MfaLoginIntent = 'API' | 'OAUTH' | 'ADMIN';
@@ -34,6 +35,7 @@ export class MfaChallengeService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly secretCryptoService: MfaSecretCryptoService,
+    private readonly recoveryCodeService: MfaRecoveryCodeService,
     private readonly totpService: TotpService,
     private readonly centralSessionService: CentralSessionService,
   ) {}
@@ -126,28 +128,48 @@ export class MfaChallengeService {
 
     const mfa = challenge.user.mfaTotp;
     let acceptedTimeStep: bigint | null = null;
+    let recoveryCodeId: string | null = null;
 
-    try {
-      const secret = this.secretCryptoService.decrypt(
-        {
-          ciphertext: Buffer.from(mfa.secretCiphertext),
-          iv: Buffer.from(mfa.secretIv),
-          authTag: Buffer.from(mfa.secretAuthTag),
-        },
+    if (/^\d{6}$/.test(code)) {
+      try {
+        const secret = this.secretCryptoService.decrypt(
+          {
+            ciphertext: Buffer.from(mfa.secretCiphertext),
+            iv: Buffer.from(mfa.secretIv),
+            authTag: Buffer.from(mfa.secretAuthTag),
+          },
+          challenge.userId,
+        );
+        acceptedTimeStep = this.totpService.validateToken(
+          secret,
+          code,
+          now.getTime(),
+        );
+      } catch {
+        acceptedTimeStep = null;
+      }
+    } else {
+      const recoveryCodeHash = this.recoveryCodeService.hash(
         challenge.userId,
-      );
-      acceptedTimeStep = this.totpService.validateToken(
-        secret,
         code,
-        now.getTime(),
       );
-    } catch {
-      acceptedTimeStep = null;
+      const recoveryCode = recoveryCodeHash
+        ? await this.prisma.mfaRecoveryCode.findFirst({
+            where: {
+              userId: challenge.userId,
+              codeHash: recoveryCodeHash,
+              usedAt: null,
+            },
+            select: { id: true },
+          })
+        : null;
+      recoveryCodeId = recoveryCode?.id ?? null;
     }
 
     if (
-      acceptedTimeStep === null ||
-      (mfa.lastUsedTimeStep !== null &&
+      (acceptedTimeStep === null && recoveryCodeId === null) ||
+      (acceptedTimeStep !== null &&
+        mfa.lastUsedTimeStep !== null &&
         acceptedTimeStep <= mfa.lastUsedTimeStep)
     ) {
       await this.recordFailure(challenge, now, maxAttempts, context);
@@ -178,19 +200,29 @@ export class MfaChallengeService {
             data: { usedAt: now },
           },
         );
-        const advancedTimeStep = await transaction.userMfaTotp.updateMany({
-          where: {
-            userId: challenge.userId,
-            enabledAt: { not: null },
-            OR: [
-              { lastUsedTimeStep: null },
-              { lastUsedTimeStep: { lt: acceptedTimeStep } },
-            ],
-          },
-          data: { lastUsedTimeStep: acceptedTimeStep },
-        });
+        const claimedFactor =
+          recoveryCodeId !== null
+            ? await transaction.mfaRecoveryCode.updateMany({
+                where: {
+                  id: recoveryCodeId,
+                  userId: challenge.userId,
+                  usedAt: null,
+                },
+                data: { usedAt: now },
+              })
+            : await transaction.userMfaTotp.updateMany({
+                where: {
+                  userId: challenge.userId,
+                  enabledAt: { not: null },
+                  OR: [
+                    { lastUsedTimeStep: null },
+                    { lastUsedTimeStep: { lt: acceptedTimeStep as bigint } },
+                  ],
+                },
+                data: { lastUsedTimeStep: acceptedTimeStep as bigint },
+              });
 
-        if (claimedChallenge.count !== 1 || advancedTimeStep.count !== 1) {
+        if (claimedChallenge.count !== 1 || claimedFactor.count !== 1) {
           throw new MfaChallengeRaceError();
         }
 
@@ -198,7 +230,7 @@ export class MfaChallengeService {
           transaction,
           user,
           context,
-          'password_totp',
+          recoveryCodeId === null ? 'password_totp' : 'password_recovery_code',
         );
 
         await transaction.auditLog.create({
@@ -208,7 +240,9 @@ export class MfaChallengeService {
             userId: user.id,
             sessionId: session.session.id,
             result: 'SUCCESS',
-            metadata: { factor: 'totp' },
+            metadata: {
+              factor: recoveryCodeId === null ? 'totp' : 'recovery_code',
+            },
             ipAddress: context.ipAddress,
           },
         });

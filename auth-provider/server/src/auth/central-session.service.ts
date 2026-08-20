@@ -11,7 +11,8 @@ import {
   SessionUser,
 } from './auth.types';
 
-type AuthenticationMethod = 'password' | 'password_totp';
+type AuthenticationMethod =
+  'password' | 'password_totp' | 'password_recovery_code';
 
 @Injectable()
 export class CentralSessionService {

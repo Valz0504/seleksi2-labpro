@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../database/prisma.service';
 import { MfaEnrollmentService } from './mfa-enrollment.service';
+import { MfaRecoveryCodeService } from './mfa-recovery-code.service';
 import { MfaSecretCryptoService } from './mfa-secret-crypto.service';
 import { TotpService } from './totp.service';
 
@@ -18,6 +19,11 @@ describe('MfaEnrollmentService', () => {
       upsert: jest.fn(),
       updateMany: jest.fn(),
     },
+    mfaRecoveryCode: {
+      count: jest.fn(),
+      deleteMany: jest.fn(),
+      createMany: jest.fn(),
+    },
     auditLog: { create: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -30,6 +36,9 @@ describe('MfaEnrollmentService', () => {
     buildProvisioningUri: jest.fn(),
     validateToken: jest.fn(),
   };
+  const recoveryCodeService = {
+    generate: jest.fn(),
+  };
   let service: MfaEnrollmentService;
 
   beforeEach(async () => {
@@ -40,6 +49,9 @@ describe('MfaEnrollmentService', () => {
     );
     prisma.userMfaTotp.upsert.mockResolvedValue({});
     prisma.userMfaTotp.updateMany.mockResolvedValue({ count: 1 });
+    prisma.mfaRecoveryCode.count.mockResolvedValue(8);
+    prisma.mfaRecoveryCode.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.mfaRecoveryCode.createMany.mockResolvedValue({ count: 2 });
     prisma.auditLog.create.mockResolvedValue({});
     cryptoService.encrypt.mockReturnValue(encrypted);
     cryptoService.decrypt.mockReturnValue('JBSWY3DPEHPK3PXP');
@@ -48,6 +60,10 @@ describe('MfaEnrollmentService', () => {
       'otpauth://totp/Labpro%20Auth%20Provider:user%40example.com?secret=JBSWY3DPEHPK3PXP',
     );
     totpService.validateToken.mockReturnValue(123n);
+    recoveryCodeService.generate.mockReturnValue({
+      rawCodes: ['ABCD-EFGH-JKMP', 'QRST-UVWX-YZ23'],
+      codeHashes: ['hash-1', 'hash-2'],
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -55,6 +71,7 @@ describe('MfaEnrollmentService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: MfaSecretCryptoService, useValue: cryptoService },
         { provide: TotpService, useValue: totpService },
+        { provide: MfaRecoveryCodeService, useValue: recoveryCodeService },
       ],
     }).compile();
 
@@ -70,14 +87,17 @@ describe('MfaEnrollmentService', () => {
     await expect(service.getStatus(userId)).resolves.toEqual({
       enabled: false,
       enrollmentPending: false,
+      recoveryCodesRemaining: 0,
     });
     await expect(service.getStatus(userId)).resolves.toEqual({
       enabled: false,
       enrollmentPending: true,
+      recoveryCodesRemaining: 0,
     });
     await expect(service.getStatus(userId)).resolves.toEqual({
       enabled: true,
       enrollmentPending: false,
+      recoveryCodesRemaining: 8,
     });
   });
 
@@ -119,7 +139,11 @@ describe('MfaEnrollmentService', () => {
       enabledAt: null,
     });
 
-    await service.confirm(userId, '123456', { ipAddress: '127.0.0.1' });
+    await expect(
+      service.confirm(userId, '123456', { ipAddress: '127.0.0.1' }),
+    ).resolves.toEqual({
+      recoveryCodes: ['ABCD-EFGH-JKMP', 'QRST-UVWX-YZ23'],
+    });
 
     const updateCalls = prisma.userMfaTotp.updateMany.mock
       .calls as unknown as Array<
@@ -148,6 +172,15 @@ describe('MfaEnrollmentService', () => {
         metadata: { factor: 'totp' },
         ipAddress: '127.0.0.1',
       },
+    });
+    expect(prisma.mfaRecoveryCode.deleteMany).toHaveBeenCalledWith({
+      where: { userId },
+    });
+    expect(prisma.mfaRecoveryCode.createMany).toHaveBeenCalledWith({
+      data: [
+        { userId, codeHash: 'hash-1' },
+        { userId, codeHash: 'hash-2' },
+      ],
     });
     expect(JSON.stringify(prisma.auditLog.create.mock.calls)).not.toContain(
       '123456',

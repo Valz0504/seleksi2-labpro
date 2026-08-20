@@ -7,11 +7,13 @@ import QRCode from 'qrcode';
 import type { RequestContext } from '../auth/auth.types';
 import { PrismaService } from '../database/prisma.service';
 import { MfaSecretCryptoService } from './mfa-secret-crypto.service';
+import { MfaRecoveryCodeService } from './mfa-recovery-code.service';
 import { TotpService } from './totp.service';
 
 export interface MfaStatus {
   enabled: boolean;
   enrollmentPending: boolean;
+  recoveryCodesRemaining: number;
 }
 
 export interface StartedMfaEnrollment {
@@ -26,6 +28,7 @@ export class MfaEnrollmentService {
     private readonly prisma: PrismaService,
     private readonly secretCryptoService: MfaSecretCryptoService,
     private readonly totpService: TotpService,
+    private readonly recoveryCodeService: MfaRecoveryCodeService,
   ) {}
 
   async getStatus(userId: string): Promise<MfaStatus> {
@@ -34,9 +37,17 @@ export class MfaEnrollmentService {
       select: { enabledAt: true },
     });
 
+    const recoveryCodesRemaining =
+      mfa?.enabledAt == null
+        ? 0
+        : await this.prisma.mfaRecoveryCode.count({
+            where: { userId, usedAt: null },
+          });
+
     return {
       enabled: mfa?.enabledAt != null,
       enrollmentPending: mfa !== null && mfa.enabledAt === null,
+      recoveryCodesRemaining,
     };
   }
 
@@ -91,7 +102,7 @@ export class MfaEnrollmentService {
     userId: string,
     code: string,
     context: RequestContext,
-  ): Promise<void> {
+  ): Promise<{ recoveryCodes: string[] }> {
     const now = new Date();
     const enrollment = await this.prisma.userMfaTotp.findUnique({
       where: { userId },
@@ -132,6 +143,8 @@ export class MfaEnrollmentService {
       throw this.invalidCodeException();
     }
 
+    const recoveryCodes = this.recoveryCodeService.generate(userId);
+
     await this.prisma.$transaction(async (transaction) => {
       const activated = await transaction.userMfaTotp.updateMany({
         where: { userId, enabledAt: null },
@@ -145,6 +158,14 @@ export class MfaEnrollmentService {
         throw this.notPendingException();
       }
 
+      await transaction.mfaRecoveryCode.deleteMany({ where: { userId } });
+      await transaction.mfaRecoveryCode.createMany({
+        data: recoveryCodes.codeHashes.map((codeHash) => ({
+          userId,
+          codeHash,
+        })),
+      });
+
       await transaction.auditLog.create({
         data: {
           eventType: 'mfa_enrolled',
@@ -156,6 +177,8 @@ export class MfaEnrollmentService {
         },
       });
     });
+
+    return { recoveryCodes: recoveryCodes.rawCodes };
   }
 
   private async auditFailedConfirmation(

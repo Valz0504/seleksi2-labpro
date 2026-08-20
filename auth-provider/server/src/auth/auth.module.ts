@@ -9,6 +9,8 @@ import { MfaChallengeService } from '../mfa/mfa-challenge.service';
 import { MfaController } from '../mfa/mfa.controller';
 import { MfaEnrollmentService } from '../mfa/mfa-enrollment.service';
 import { MfaSecretCryptoService } from '../mfa/mfa-secret-crypto.service';
+import { MfaRecoveryCodeService } from '../mfa/mfa-recovery-code.service';
+import { MfaManagementService } from '../mfa/mfa-management.service';
 import { TotpService } from '../mfa/totp.service';
 
 @Module({
@@ -21,6 +23,8 @@ import { TotpService } from '../mfa/totp.service';
     MfaChallengeCookieService,
     MfaChallengeService,
     MfaEnrollmentService,
+    MfaRecoveryCodeService,
+    MfaManagementService,
     MfaSecretCryptoService,
     TotpService,
   ],

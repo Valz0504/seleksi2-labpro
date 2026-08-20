@@ -7,6 +7,7 @@ describe('AdminRevocationService', () => {
     applicationGroupPolicy: { findFirst: jest.fn() },
     ssoSession: { updateManyAndReturn: jest.fn() },
     accessToken: { updateMany: jest.fn() },
+    mfaLoginChallenge: { updateMany: jest.fn() },
     outboxEvent: { createMany: jest.fn() },
   };
   const now = new Date('2026-08-17T06:00:00.000Z');
@@ -25,6 +26,7 @@ describe('AdminRevocationService', () => {
     jest.clearAllMocks();
     transaction.ssoSession.updateManyAndReturn.mockResolvedValue([]);
     transaction.accessToken.updateMany.mockResolvedValue({ count: 1 });
+    transaction.mfaLoginChallenge.updateMany.mockResolvedValue({ count: 1 });
     transaction.outboxEvent.createMany.mockResolvedValue({ count: 1 });
     service = new AdminRevocationService(new OutboxEventService());
   });
@@ -44,6 +46,10 @@ describe('AdminRevocationService', () => {
       callOrder.push('token');
       return Promise.resolve({ count: 1 });
     });
+    transaction.mfaLoginChallenge.updateMany.mockImplementation(() => {
+      callOrder.push('mfa');
+      return Promise.resolve({ count: 1 });
+    });
     transaction.outboxEvent.createMany.mockImplementation(() => {
       callOrder.push('event');
       return Promise.resolve({ count: 1 });
@@ -58,7 +64,7 @@ describe('AdminRevocationService', () => {
       now,
     );
 
-    expect(callOrder).toEqual(['session', 'token', 'event']);
+    expect(callOrder).toEqual(['session', 'token', 'mfa', 'event']);
     expect(transaction.ssoSession.updateManyAndReturn).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -81,6 +87,13 @@ describe('AdminRevocationService', () => {
         metadata: { source: 'admin_user_deactivation' },
       }),
     ]);
+    expect(transaction.mfaLoginChallenge.updateMany).toHaveBeenCalledWith({
+      where: {
+        userId: { in: ['11111111-1111-4111-8111-111111111111'] },
+        usedAt: null,
+      },
+      data: { usedAt: now },
+    });
   });
 
   it('emits one PasswordChanged event even when there is no active session', async () => {
@@ -163,6 +176,7 @@ describe('AdminRevocationService', () => {
     ).resolves.toEqual([]);
     expect(transaction.ssoSession.updateManyAndReturn).not.toHaveBeenCalled();
     expect(transaction.accessToken.updateMany).not.toHaveBeenCalled();
+    expect(transaction.mfaLoginChallenge.updateMany).not.toHaveBeenCalled();
     expect(transaction.outboxEvent.createMany).not.toHaveBeenCalled();
   });
 });

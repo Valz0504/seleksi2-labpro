@@ -26,6 +26,7 @@ describe('AdminUsersService', () => {
     user: { create: jest.fn(), update: jest.fn() },
     ssoSession: { updateManyAndReturn: jest.fn() },
     accessToken: { updateMany: jest.fn() },
+    mfaLoginChallenge: { updateMany: jest.fn() },
     outboxEvent: { createMany: jest.fn() },
     auditLog: { create: jest.fn() },
   };
@@ -46,6 +47,7 @@ describe('AdminUsersService', () => {
       },
     ]);
     transaction.accessToken.updateMany.mockResolvedValue({ count: 1 });
+    transaction.mfaLoginChallenge.updateMany.mockResolvedValue({ count: 1 });
     transaction.outboxEvent.createMany.mockResolvedValue({ count: 1 });
     transaction.auditLog.create.mockResolvedValue({});
     prisma.$transaction.mockImplementation(
