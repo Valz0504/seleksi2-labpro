@@ -67,24 +67,76 @@ enum EventDeliveryStatus {
   FAILED
 }
 
+enum MfaLoginIntent {
+  API
+  OAUTH
+  ADMIN
+}
+
 model User {
-  id                String              @id @default(uuid()) @db.Uuid
-  name              String
-  email             String              @unique
-  passwordHash      String              @map("password_hash")
-  status            UserStatus          @default(ACTIVE)
-  role              UserRole            @default(USER)
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
-  userGroups        UserGroup[]
-  ssoSessions       SsoSession[]
-  authCodes         AuthorizationCode[]
-  accessTokens      AccessToken[]
-  auditLogsAsActor  AuditLog[]          @relation("AuditLogActor")
-  auditLogsAsTarget AuditLog[]          @relation("AuditLogTargetUser")
-  outboxEvents      OutboxEvent[]
+  id                 String              @id @default(uuid()) @db.Uuid
+  name               String
+  email              String              @unique
+  passwordHash       String              @map("password_hash")
+  status             UserStatus          @default(ACTIVE)
+  role               UserRole            @default(USER)
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  userGroups         UserGroup[]
+  ssoSessions        SsoSession[]
+  authCodes          AuthorizationCode[]
+  accessTokens       AccessToken[]
+  auditLogsAsActor   AuditLog[]          @relation("AuditLogActor")
+  auditLogsAsTarget  AuditLog[]          @relation("AuditLogTargetUser")
+  outboxEvents       OutboxEvent[]
+  mfaTotp            UserMfaTotp?
+  mfaLoginChallenges MfaLoginChallenge[]
+  mfaRecoveryCodes   MfaRecoveryCode[]
 
   @@map("users")
+}
+
+model UserMfaTotp {
+  userId           String    @id @map("user_id") @db.Uuid
+  secretCiphertext Bytes     @map("secret_ciphertext")
+  secretIv         Bytes     @map("secret_iv")
+  secretAuthTag    Bytes     @map("secret_auth_tag")
+  enabledAt        DateTime? @map("enabled_at")
+  lastUsedTimeStep BigInt?   @map("last_used_time_step")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_mfa_totp")
+}
+
+model MfaLoginChallenge {
+  id           String         @id @default(uuid()) @db.Uuid
+  tokenHash    String         @unique @map("token_hash")
+  userId       String         @map("user_id") @db.Uuid
+  intent       MfaLoginIntent
+  returnTo     String?        @map("return_to") @db.Text
+  attemptCount Int            @default(0) @map("attempt_count")
+  expiresAt    DateTime       @map("expires_at")
+  usedAt       DateTime?      @map("used_at")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt, expiresAt])
+  @@index([expiresAt])
+  @@map("mfa_login_challenges")
+}
+
+model MfaRecoveryCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @unique @map("code_hash")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+  @@map("mfa_recovery_codes")
 }
 
 model Group {
