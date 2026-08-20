@@ -196,6 +196,7 @@ Penghapusan relasi akses memicu evaluasi ulang policy. Session hanya dicabut ket
 - Tailwind CSS 4.3.3;
 - PostgreSQL driver `pg` 8.22.0;
 - RabbitMQ client `amqplib` 2.0.1;
+- Prometheus client `prom-client` 15.1.3;
 - Argon2 0.45.1;
 - Jest 30.4.2;
 - ESLint 9.39.5;
@@ -212,6 +213,7 @@ Endpoint dasar:
 - `GET /health` — compatibility health check dengan semantik liveness;
 - `GET /health/live` — memastikan proses Auth Provider masih merespons tanpa memeriksa dependency;
 - `GET /health/ready` — memeriksa koneksi Primary Database dan RabbitMQ;
+- `GET /metrics` — metrics Auth Server dalam format Prometheus;
 - `GET /docs` — antarmuka Swagger/OpenAPI;
 - `GET /docs-json` — dokumen OpenAPI dalam format JSON;
 - `GET /docs-yaml` — dokumen OpenAPI dalam format YAML.
@@ -263,6 +265,10 @@ Administrasi application:
 - `POST /admin/applications/:applicationId/policies` — menambahkan group policy;
 - `DELETE /admin/applications/:applicationId/policies/:policyId` — menghapus group policy.
 
+Observability administrator:
+
+- `GET /admin/metrics` — snapshot JSON agregat untuk dashboard metrics; membutuhkan central session administrator.
+
 ### Control Panel — http://localhost:3000
 
 - `GET /` — status central session dan global logout;
@@ -278,6 +284,8 @@ Administrasi application:
 - `GET /admin/applications` — daftar application;
 - `GET /admin/applications/new` — form pembuatan application;
 - `GET /admin/applications/:applicationId` — pengelolaan application, secret, redirect URI, dan policy;
+- `GET /admin/metrics` — dashboard observability administrator dengan refresh otomatis;
+- `GET /api/admin/metrics` — proxy snapshot metrics untuk dashboard; membutuhkan central session administrator;
 - `GET /api/health` — health check proses Control Panel.
 
 Mutasi pada Control Panel dilakukan melalui Next.js Server Actions dari halaman administrator.
@@ -306,8 +314,13 @@ Mutasi pada Control Panel dilakukan melalui Next.js Server Actions dari halaman 
 
 - `GET /` — informasi service;
 - `GET /health` — health check Sync Worker.
+- `GET /metrics` — metrics consumer dan delivery dalam format Prometheus.
 
 ## Bonus yang Dikerjakan
+
+### B02 — Observability
+
+Auth Server dan Sync Worker menyediakan metrics Prometheus untuk HTTP rate/error/duration, auth, outbox, delivery, dependency, serta kondisi RabbitMQ sebenarnya. Control Panel menyediakan dashboard administrator pada `GET /admin/metrics` yang menampilkan latency, request/error rate, queue depth, DLQ, status dependency, dan event processing dengan refresh otomatis setiap lima detik.
 
 ### B03 — Liveness dan Readiness Probe
 
