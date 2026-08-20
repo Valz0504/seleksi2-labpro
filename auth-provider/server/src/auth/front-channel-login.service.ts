@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 const AUTH_SERVER_BASE_URL = 'http://auth-server.internal';
 
 export type LoginPageError = 'invalid_credentials';
+export type MfaLoginPageError = 'invalid_or_expired_code';
 export type PublicHomeNotice = 'sso_logged_out';
 
 @Injectable()
@@ -62,6 +63,19 @@ export class FrontChannelLoginService {
       loginPageUrl.searchParams.set('error', error);
     } else {
       loginPageUrl.searchParams.delete('error');
+    }
+
+    return loginPageUrl.toString();
+  }
+
+  buildMfaLoginPageUrl(error?: MfaLoginPageError): string {
+    const loginPageUrl = new URL(
+      '/login/mfa',
+      this.configService.getOrThrow<string>('AUTH_LOGIN_URL'),
+    );
+
+    if (error) {
+      loginPageUrl.searchParams.set('error', error);
     }
 
     return loginPageUrl.toString();

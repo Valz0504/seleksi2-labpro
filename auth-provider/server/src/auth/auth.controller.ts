@@ -27,8 +27,10 @@ import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { BrowserLoginDto } from './dto/browser-login.dto';
 import { LoginDto } from './dto/login.dto';
+import { MfaCodeDto } from './dto/mfa-code.dto';
 import { FrontChannelLoginService } from './front-channel-login.service';
 import { SessionCookieService } from './session-cookie.service';
+import { MfaChallengeCookieService } from '../mfa/mfa-challenge-cookie.service';
 
 @Controller('auth')
 @ApiTags('Authentication')
@@ -37,6 +39,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly frontChannelLoginService: FrontChannelLoginService,
     private readonly sessionCookieService: SessionCookieService,
+    private readonly mfaChallengeCookieService: MfaChallengeCookieService,
   ) {}
 
   @Post('login')
@@ -65,6 +68,11 @@ export class AuthController {
     },
   })
   @ApiBadRequestResponse({ description: 'The request body is malformed.' })
+  @ApiResponse({
+    status: HttpStatus.ACCEPTED,
+    description:
+      'The password is valid, but an MFA challenge must be completed before a central session is created.',
+  })
   @ApiUnauthorizedResponse({
     description:
       'Generic credential failure for an unknown, inactive, or mismatched account.',
@@ -83,6 +91,18 @@ export class AuthController {
       },
     );
 
+    if (result.status === 'mfa_required') {
+      this.sessionCookieService.clear(response);
+      this.mfaChallengeCookieService.write(response, result.challengeToken);
+      response.status(HttpStatus.ACCEPTED);
+
+      return {
+        mfaRequired: true,
+        expiresAt: result.expiresAt,
+      };
+    }
+
+    this.mfaChallengeCookieService.clear(response);
     this.sessionCookieService.write(response, result.sessionToken);
 
     return {
@@ -122,8 +142,20 @@ export class AuthController {
           ipAddress: request.ip?.slice(0, 45),
           userAgent: request.get('user-agent'),
         },
+        { intent: { type: 'OAUTH', returnTo } },
       );
 
+      if (result.status === 'mfa_required') {
+        this.sessionCookieService.clear(response);
+        this.mfaChallengeCookieService.write(response, result.challengeToken);
+        response.redirect(
+          HttpStatus.SEE_OTHER,
+          this.frontChannelLoginService.buildMfaLoginPageUrl(),
+        );
+        return;
+      }
+
+      this.mfaChallengeCookieService.clear(response);
       this.sessionCookieService.write(response, result.sessionToken);
       response.redirect(HttpStatus.SEE_OTHER, returnTo);
     } catch (error: unknown) {
@@ -165,9 +197,20 @@ export class AuthController {
           ipAddress: request.ip?.slice(0, 45),
           userAgent: request.get('user-agent'),
         },
-        { requiredRole: 'ADMIN' },
+        { requiredRole: 'ADMIN', intent: { type: 'ADMIN' } },
       );
 
+      if (result.status === 'mfa_required') {
+        this.sessionCookieService.clear(response);
+        this.mfaChallengeCookieService.write(response, result.challengeToken);
+        response.redirect(
+          HttpStatus.SEE_OTHER,
+          this.frontChannelLoginService.buildMfaLoginPageUrl(),
+        );
+        return;
+      }
+
+      this.mfaChallengeCookieService.clear(response);
       this.sessionCookieService.write(response, result.sessionToken);
       response.redirect(
         HttpStatus.SEE_OTHER,
@@ -182,6 +225,101 @@ export class AuthController {
         HttpStatus.SEE_OTHER,
         this.frontChannelLoginService.buildAdminLoginPageUrl(
           'invalid_credentials',
+        ),
+      );
+    }
+  }
+
+  @Post('login/mfa')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Complete an API login pending MFA verification',
+  })
+  @ApiOkResponse({
+    description:
+      'The one-time code was valid and a central session was created.',
+  })
+  @ApiBadRequestResponse({ description: 'The request body is malformed.' })
+  @ApiUnauthorizedResponse({
+    description:
+      'The code or pending challenge is invalid, expired, used, or has reached its attempt limit.',
+  })
+  async completeMfaLogin(
+    @Body() mfaCodeDto: MfaCodeDto,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const challengeToken = this.requireMfaChallengeToken(request);
+    const result = await this.authService.completeMfaLogin(
+      challengeToken,
+      mfaCodeDto.code,
+      ['API'],
+      {
+        ipAddress: request.ip?.slice(0, 45),
+        userAgent: request.get('user-agent'),
+      },
+    );
+
+    this.mfaChallengeCookieService.clear(response);
+    this.sessionCookieService.write(response, result.sessionToken);
+
+    return { user: result.user, session: result.session };
+  }
+
+  @Post('login/mfa/continue')
+  @ApiOperation({
+    summary: 'Complete a browser login pending MFA verification',
+  })
+  @ApiConsumes('application/x-www-form-urlencoded')
+  @ApiBody({ type: MfaCodeDto })
+  @ApiResponse({
+    status: HttpStatus.SEE_OTHER,
+    description:
+      'Creates the central session and resumes OAuth or admin login, or returns to the MFA page with a generic error.',
+  })
+  async continueMfaLogin(
+    @Body() mfaCodeDto: MfaCodeDto,
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    try {
+      const challengeToken = this.requireMfaChallengeToken(request);
+      const result = await this.authService.completeMfaLogin(
+        challengeToken,
+        mfaCodeDto.code,
+        ['OAUTH', 'ADMIN'],
+        {
+          ipAddress: request.ip?.slice(0, 45),
+          userAgent: request.get('user-agent'),
+        },
+      );
+
+      this.mfaChallengeCookieService.clear(response);
+      this.sessionCookieService.write(response, result.sessionToken);
+
+      if (result.intent === 'OAUTH' && result.returnTo !== null) {
+        response.redirect(HttpStatus.SEE_OTHER, result.returnTo);
+        return;
+      }
+
+      if (result.intent === 'ADMIN') {
+        response.redirect(
+          HttpStatus.SEE_OTHER,
+          this.frontChannelLoginService.getAdminDashboardUrl(),
+        );
+        return;
+      }
+
+      throw new UnauthorizedException();
+    } catch (error: unknown) {
+      if (!(error instanceof UnauthorizedException)) {
+        throw error;
+      }
+
+      response.redirect(
+        HttpStatus.SEE_OTHER,
+        this.frontChannelLoginService.buildMfaLoginPageUrl(
+          'invalid_or_expired_code',
         ),
       );
     }
@@ -297,6 +435,21 @@ export class AuthController {
     return sessionToken;
   }
 
+  private requireMfaChallengeToken(request: Request): string {
+    const challengeToken = this.mfaChallengeCookieService.read(request);
+
+    if (!challengeToken) {
+      throw new UnauthorizedException({
+        error: {
+          code: 'MFA_VERIFICATION_FAILED',
+          message: 'Kode MFA tidak valid atau challenge telah berakhir',
+        },
+      });
+    }
+
+    return challengeToken;
+  }
+
   private async clearCurrentSession(
     request: Request,
     response: Response,
@@ -310,5 +463,6 @@ export class AuthController {
     }
 
     this.sessionCookieService.clear(response);
+    this.mfaChallengeCookieService.clear(response);
   }
 }

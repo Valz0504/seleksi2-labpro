@@ -9,6 +9,8 @@ import { hashPassword } from './../src/common/security/password';
 import { hashSecret } from './../src/common/security/secret';
 import { PrismaService } from './../src/database/prisma.service';
 import { RabbitMqPublisherService } from './../src/event-processing/rabbitmq-publisher.service';
+import { MfaSecretCryptoService } from './../src/mfa/mfa-secret-crypto.service';
+import { TotpService } from './../src/mfa/totp.service';
 import { ShutdownStateService } from './../src/shutdown/shutdown-state.service';
 
 describe('AppController (e2e)', () => {
@@ -75,6 +77,27 @@ describe('AppController (e2e)', () => {
         revokedAt: Date | null;
       }
     | undefined;
+  let currentMfaRecord:
+    | {
+        secretCiphertext: Buffer;
+        secretIv: Buffer;
+        secretAuthTag: Buffer;
+        enabledAt: Date;
+        lastUsedTimeStep: bigint | null;
+      }
+    | undefined;
+  let persistedMfaChallenge:
+    | {
+        id: string;
+        tokenHash: string;
+        userId: string;
+        intent: 'API' | 'OAUTH' | 'ADMIN';
+        returnTo: string | null;
+        attemptCount: number;
+        expiresAt: Date;
+        usedAt: Date | null;
+      }
+    | undefined;
   const activeUser = {
     id: '11111111-1111-4111-8111-111111111111',
     name: 'Admin',
@@ -126,6 +149,14 @@ describe('AppController (e2e)', () => {
       findUnique: jest.fn(),
       updateMany: jest.fn(),
     },
+    mfaLoginChallenge: {
+      create: jest.fn(),
+      findUnique: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    userMfaTotp: {
+      updateMany: jest.fn(),
+    },
     auditLog: {
       create: jest.fn(),
       groupBy: jest.fn(),
@@ -165,6 +196,16 @@ describe('AppController (e2e)', () => {
         return event.eventType === eventType;
       });
   };
+  const findLatestAuditEvent = (eventType: string) => {
+    const calls = prisma.auditLog.create.mock.calls as unknown as Array<
+      [{ data: { eventType: string; metadata?: unknown } }]
+    >;
+
+    return calls
+      .map(([input]) => input.data)
+      .findLast((event) => event.eventType === eventType);
+  };
+  const getPersistedMfaChallenge = () => persistedMfaChallenge;
   const findOutboxEvent = (eventType: string) => {
     const calls = prisma.outboxEvent.createMany.mock.calls as unknown as Array<
       [
@@ -191,6 +232,22 @@ describe('AppController (e2e)', () => {
       .flatMap(([input]) => input.data)
       .find((event) => event.eventType === eventType);
   };
+  const enableCurrentUserMfa = (): string => {
+    const secret = 'JBSWY3DPEHPK3PXP';
+    const encrypted = app
+      .get(MfaSecretCryptoService)
+      .encrypt(secret, activeUser.id);
+
+    currentMfaRecord = {
+      secretCiphertext: encrypted.ciphertext,
+      secretIv: encrypted.iv,
+      secretAuthTag: encrypted.authTag,
+      enabledAt: new Date(),
+      lastUsedTimeStep: null,
+    };
+
+    return secret;
+  };
 
   beforeAll(async () => {
     prisma.$queryRaw.mockResolvedValue([{ result: 1 }]);
@@ -200,7 +257,13 @@ describe('AppController (e2e)', () => {
       ({ where }: { where: { email: string } }) =>
         Promise.resolve(
           where.email === activeUser.email
-            ? { ...activeUser, role: currentRole }
+            ? {
+                ...activeUser,
+                role: currentRole,
+                mfaTotp: currentMfaRecord
+                  ? { enabledAt: currentMfaRecord.enabledAt }
+                  : null,
+              }
             : null,
         ),
     );
@@ -410,6 +473,101 @@ describe('AppController (e2e)', () => {
         }
 
         persistedAuthorizationCode.usedAt = data.usedAt;
+        return Promise.resolve({ count: 1 });
+      },
+    );
+    prisma.mfaLoginChallenge.create.mockImplementation(
+      ({
+        data,
+      }: {
+        data: Omit<
+          NonNullable<typeof persistedMfaChallenge>,
+          'id' | 'attemptCount' | 'usedAt'
+        >;
+      }) => {
+        persistedMfaChallenge = {
+          id: '88888888-8888-4888-8888-888888888888',
+          ...data,
+          attemptCount: 0,
+          usedAt: null,
+        };
+
+        return Promise.resolve(persistedMfaChallenge);
+      },
+    );
+    prisma.mfaLoginChallenge.findUnique.mockImplementation(
+      ({ where }: { where: { tokenHash: string } }) =>
+        Promise.resolve(
+          persistedMfaChallenge?.tokenHash === where.tokenHash &&
+            currentMfaRecord
+            ? {
+                ...persistedMfaChallenge,
+                user: {
+                  ...activeUser,
+                  role: currentRole,
+                  mfaTotp: currentMfaRecord,
+                },
+              }
+            : null,
+        ),
+    );
+    prisma.mfaLoginChallenge.updateMany.mockImplementation(
+      ({
+        where,
+        data,
+      }: {
+        where: Record<string, unknown>;
+        data: Record<string, unknown>;
+      }) => {
+        if (!persistedMfaChallenge) {
+          return Promise.resolve({ count: 0 });
+        }
+
+        if ('userId' in where && !('id' in where)) {
+          if (persistedMfaChallenge.usedAt === null) {
+            persistedMfaChallenge.usedAt = data['usedAt'] as Date;
+          }
+          return Promise.resolve({ count: 1 });
+        }
+
+        if (where['id'] !== persistedMfaChallenge.id) {
+          return Promise.resolve({ count: 0 });
+        }
+
+        if (
+          data['usedAt'] instanceof Date &&
+          persistedMfaChallenge.usedAt === null &&
+          persistedMfaChallenge.expiresAt > new Date() &&
+          persistedMfaChallenge.attemptCount < 5
+        ) {
+          persistedMfaChallenge.usedAt = data['usedAt'];
+          return Promise.resolve({ count: 1 });
+        }
+
+        if (
+          typeof data['attemptCount'] === 'object' &&
+          data['attemptCount'] !== null &&
+          persistedMfaChallenge.usedAt === null &&
+          persistedMfaChallenge.attemptCount < 5
+        ) {
+          persistedMfaChallenge.attemptCount += 1;
+          return Promise.resolve({ count: 1 });
+        }
+
+        return Promise.resolve({ count: 0 });
+      },
+    );
+    prisma.userMfaTotp.updateMany.mockImplementation(
+      ({ data }: { data: { lastUsedTimeStep: bigint } }) => {
+        if (
+          !currentMfaRecord ||
+          (currentMfaRecord.lastUsedTimeStep !== null &&
+            currentMfaRecord.lastUsedTimeStep >= data.lastUsedTimeStep)
+        ) {
+          return Promise.resolve({ count: 0 });
+        }
+
+        currentMfaRecord.lastUsedTimeStep = data.lastUsedTimeStep;
         return Promise.resolve({ count: 1 });
       },
     );
@@ -624,7 +782,9 @@ describe('AppController (e2e)', () => {
         expect(body.components?.securitySchemes).toHaveProperty(
           'clientCredentials',
         );
-        expect(operationCount).toBe(38);
+        expect(body.paths).toHaveProperty('/auth/login/mfa');
+        expect(body.paths).toHaveProperty('/auth/login/mfa/continue');
+        expect(operationCount).toBe(40);
         expect(
           body.components?.schemas?.['CreateUserDto']?.properties?.['password'],
         ).toMatchObject({ writeOnly: true });
@@ -667,6 +827,165 @@ describe('AppController (e2e)', () => {
       .post('/auth/login')
       .send({ email: 'not-an-email', password: '', unexpected: true })
       .expect(400);
+  });
+
+  it('does not create a central session until active MFA is verified', async () => {
+    const secret = enableCurrentUserMfa();
+    const mfaAgent = request.agent(app.getHttpServer());
+    persistedSession = undefined;
+    persistedMfaChallenge = undefined;
+
+    try {
+      const loginResponse = await mfaAgent
+        .post('/auth/login')
+        .send({ email: activeUser.email, password: 'correct-password' })
+        .expect(202);
+      const setCookies = loginResponse.headers['set-cookie'] as unknown as
+        string[] | undefined;
+      const pendingCookie = setCookies
+        ?.find((cookie) => cookie.startsWith('mfa_challenge='))
+        ?.split(';', 1)[0];
+      const loginResponseBody = loginResponse.body as unknown;
+
+      expect(loginResponseBody).toMatchObject({
+        mfaRequired: true,
+      });
+      if (
+        typeof loginResponseBody !== 'object' ||
+        loginResponseBody === null ||
+        !('expiresAt' in loginResponseBody)
+      ) {
+        throw new Error('MFA login response did not include an expiry');
+      }
+      expect(typeof loginResponseBody.expiresAt).toBe('string');
+      expect(loginResponseBody).not.toHaveProperty('user');
+      expect(pendingCookie).toEqual(expect.any(String));
+      expect(persistedMfaChallenge).toMatchObject({
+        userId: activeUser.id,
+        intent: 'API',
+        returnTo: null,
+        attemptCount: 0,
+        usedAt: null,
+      });
+      expect(persistedSession).toBeUndefined();
+
+      const validCode = app.get(TotpService).generateToken(secret);
+      const wrongCode = validCode === '000000' ? '000001' : '000000';
+
+      await mfaAgent
+        .post('/auth/login/mfa')
+        .send({ code: wrongCode })
+        .expect(401)
+        .expect({
+          error: {
+            code: 'MFA_VERIFICATION_FAILED',
+            message: 'Kode MFA tidak valid atau challenge telah berakhir',
+          },
+        });
+      expect(getPersistedMfaChallenge()?.attemptCount).toBe(1);
+      expect(persistedSession).toBeUndefined();
+      expect(findAuditEvent('mfa_failed')).toMatchObject({
+        eventType: 'mfa_failed',
+        userId: activeUser.id,
+        result: 'FAILED',
+        metadata: { reason: 'verification_rejected' },
+      });
+
+      await mfaAgent
+        .post('/auth/login/mfa')
+        .send({ code: validCode })
+        .expect(200)
+        .expect(({ body }: { body: Record<string, unknown> }) => {
+          expect(body).toMatchObject({
+            user: { id: activeUser.id },
+            session: { status: 'ACTIVE' },
+          });
+        });
+      expect(getPersistedMfaChallenge()?.usedAt).toEqual(expect.any(Date));
+      expect(persistedSession).toBeDefined();
+      expect(findAuditEvent('mfa_success')).toMatchObject({
+        eventType: 'mfa_success',
+        userId: activeUser.id,
+        result: 'SUCCESS',
+        metadata: { factor: 'totp' },
+      });
+      expect(findLatestAuditEvent('LoginSucceeded')).toMatchObject({
+        metadata: { authenticationMethod: 'password_totp' },
+      });
+      expect(JSON.stringify(prisma.auditLog.create.mock.calls)).not.toContain(
+        validCode,
+      );
+
+      const sessionCreateCount = prisma.ssoSession.create.mock.calls.length;
+
+      await request(app.getHttpServer())
+        .post('/auth/login/mfa')
+        .set('Cookie', pendingCookie as string)
+        .send({ code: validCode })
+        .expect(401);
+      expect(prisma.ssoSession.create).toHaveBeenCalledTimes(
+        sessionCreateCount,
+      );
+    } finally {
+      currentMfaRecord = undefined;
+      persistedMfaChallenge = undefined;
+    }
+  });
+
+  it('requires MFA on both OAuth continuation and admin login', async () => {
+    enableCurrentUserMfa();
+    persistedSession = undefined;
+    persistedMfaChallenge = undefined;
+    const returnTo = `/authorize?${new URLSearchParams({
+      client_id: 'app-a',
+      redirect_uri: applicationRedirectUri,
+      response_type: 'code',
+      state: validState,
+      code_challenge: validCodeChallenge,
+      code_challenge_method: 'S256',
+    }).toString()}`;
+
+    try {
+      const oauthResponse = await request(app.getHttpServer())
+        .post('/auth/login/continue')
+        .type('form')
+        .send({
+          email: activeUser.email,
+          password: 'correct-password',
+          returnTo,
+        })
+        .expect(303);
+
+      expect(oauthResponse.headers['location']).toBe(
+        'http://localhost:3000/login/mfa',
+      );
+      expect(persistedMfaChallenge).toMatchObject({
+        intent: 'OAUTH',
+        returnTo,
+      });
+      expect(persistedSession).toBeUndefined();
+
+      const adminResponse = await request(app.getHttpServer())
+        .post('/auth/login/admin')
+        .type('form')
+        .send({
+          email: activeUser.email,
+          password: 'correct-password',
+        })
+        .expect(303);
+
+      expect(adminResponse.headers['location']).toBe(
+        'http://localhost:3000/login/mfa',
+      );
+      expect(persistedMfaChallenge).toMatchObject({
+        intent: 'ADMIN',
+        returnTo: null,
+      });
+      expect(persistedSession).toBeUndefined();
+    } finally {
+      currentMfaRecord = undefined;
+      persistedMfaChallenge = undefined;
+    }
   });
 
   it('does not redirect an authorization request to an unregistered URI', () => {
