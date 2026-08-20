@@ -33,6 +33,9 @@ describe('OutboxPublisherService', () => {
   const rabbitMqPublisher = {
     publish: jest.fn(),
   };
+  const metrics = {
+    recordOutboxPublish: jest.fn(),
+  };
   const configuration: Record<string, boolean | number> = {
     OUTBOX_PUBLISHER_ENABLED: true,
     OUTBOX_PUBLISH_INTERVAL_MS: 1_000,
@@ -67,6 +70,7 @@ describe('OutboxPublisherService', () => {
     service = new OutboxPublisherService(
       prisma as never,
       rabbitMqPublisher as unknown as RabbitMqPublisherService,
+      metrics as never,
       configService as never,
     );
   });
@@ -95,6 +99,10 @@ describe('OutboxPublisherService', () => {
 
     await expect(publishing).resolves.toBe(1);
     expect(prisma.outboxEvent.updateMany).toHaveBeenCalledTimes(2);
+    expect(metrics.recordOutboxPublish).toHaveBeenCalledWith(
+      'success',
+      expect.any(Number),
+    );
     expect(updateInputs()[1]).toMatchObject({
       where: {
         id: event.eventId,
@@ -132,6 +140,10 @@ describe('OutboxPublisherService', () => {
     expect(failureUpdate?.data.nextPublishAttemptAt).toBeInstanceOf(Date);
     expect(failureUpdate?.data.lastError).toContain('ECONNREFUSED');
     expect(failureUpdate?.data.lastError).not.toContain('user:secret');
+    expect(metrics.recordOutboxPublish).toHaveBeenCalledWith(
+      'failure',
+      expect.any(Number),
+    );
   });
 
   it('does not publish a malformed or mismatched outbox payload', async () => {

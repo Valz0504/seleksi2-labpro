@@ -20,6 +20,10 @@ import {
   InternalLogoutClientService,
   type LogoutNotificationTarget,
 } from './internal-logout-client.service';
+import {
+  type DeliveryOutcome,
+  WorkerMetricsService,
+} from '../metrics/worker-metrics.service';
 
 @Injectable()
 export class RevocationDeliveryService {
@@ -32,6 +36,7 @@ export class RevocationDeliveryService {
     private readonly prisma: PrismaService,
     private readonly internalLogoutClient: InternalLogoutClientService,
     private readonly deadLetterPublisher: DeadLetterPublisherService,
+    private readonly metrics: WorkerMetricsService,
     configService: ConfigService,
   ) {
     this.maxAttempts = configService.getOrThrow<number>(
@@ -232,58 +237,68 @@ export class RevocationDeliveryService {
       return;
     }
 
+    const startedAt = process.hrtime.bigint();
+    let outcome: DeliveryOutcome = 'error';
+
     try {
-      await this.internalLogoutClient.deliver(target, event);
-    } catch (error) {
-      const failedAt = new Date();
-      const safeError = safeErrorMessage(error);
-      const exhausted = attemptNumber >= this.maxAttempts;
-      const nextRetryAt = exhausted
-        ? failedAt
-        : new Date(failedAt.getTime() + this.retryDelayMs(attemptNumber));
-      const retrying = await this.prisma.eventDelivery.updateMany({
+      try {
+        await this.internalLogoutClient.deliver(target, event);
+      } catch (error) {
+        const failedAt = new Date();
+        const safeError = safeErrorMessage(error);
+        const exhausted = attemptNumber >= this.maxAttempts;
+        const nextRetryAt = exhausted
+          ? failedAt
+          : new Date(failedAt.getTime() + this.retryDelayMs(attemptNumber));
+        const retrying = await this.prisma.eventDelivery.updateMany({
+          where: {
+            id: delivery.id,
+            status: EventDeliveryStatus.PROCESSING,
+            attemptCount: attemptNumber,
+          },
+          data: {
+            status: EventDeliveryStatus.RETRYING,
+            nextRetryAt,
+            lastError: safeError,
+          },
+        });
+
+        if (retrying.count !== 1) {
+          throw new Error('Failed request outcome could not be persisted');
+        }
+
+        const nextAction = exhausted
+          ? 'has exhausted its attempts and is waiting for dead-letter publishing'
+          : `will retry at ${nextRetryAt.toISOString()}`;
+
+        outcome = 'retry';
+        this.logger.warn(
+          `Delivery ${delivery.id} to application ${target.id} ${nextAction}: ${safeError}`,
+        );
+        return;
+      }
+
+      const succeeded = await this.prisma.eventDelivery.updateMany({
         where: {
           id: delivery.id,
           status: EventDeliveryStatus.PROCESSING,
           attemptCount: attemptNumber,
         },
         data: {
-          status: EventDeliveryStatus.RETRYING,
-          nextRetryAt,
-          lastError: safeError,
+          status: EventDeliveryStatus.SUCCEEDED,
+          processedAt: new Date(),
+          nextRetryAt: null,
+          lastError: null,
         },
       });
 
-      if (retrying.count !== 1) {
-        throw new Error('Failed request outcome could not be persisted');
+      if (succeeded.count !== 1) {
+        throw new Error('Claimed event delivery could not be marked succeeded');
       }
 
-      const nextAction = exhausted
-        ? 'has exhausted its attempts and is waiting for dead-letter publishing'
-        : `will retry at ${nextRetryAt.toISOString()}`;
-
-      this.logger.warn(
-        `Delivery ${delivery.id} to application ${target.id} ${nextAction}: ${safeError}`,
-      );
-      return;
-    }
-
-    const succeeded = await this.prisma.eventDelivery.updateMany({
-      where: {
-        id: delivery.id,
-        status: EventDeliveryStatus.PROCESSING,
-        attemptCount: attemptNumber,
-      },
-      data: {
-        status: EventDeliveryStatus.SUCCEEDED,
-        processedAt: new Date(),
-        nextRetryAt: null,
-        lastError: null,
-      },
-    });
-
-    if (succeeded.count !== 1) {
-      throw new Error('Claimed event delivery could not be marked succeeded');
+      outcome = 'success';
+    } finally {
+      this.metrics.recordDelivery(outcome, this.elapsedSeconds(startedAt));
     }
   }
 
@@ -385,6 +400,7 @@ export class RevocationDeliveryService {
       throw new Error('Dead-lettered delivery could not be marked failed');
     }
 
+    this.metrics.recordTerminalFailure();
     this.logger.error(
       `Delivery ${delivery.id} to application ${delivery.applicationId} moved to the dead-letter queue after ${delivery.attemptCount} attempts`,
     );
@@ -394,5 +410,9 @@ export class RevocationDeliveryService {
     const exponent = Math.min(Math.max(attemptNumber - 1, 0), 30);
 
     return Math.min(this.retryBaseMs * 2 ** exponent, this.retryMaxMs);
+  }
+
+  private elapsedSeconds(startedAt: bigint): number {
+    return Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
   }
 }

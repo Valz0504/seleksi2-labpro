@@ -2,6 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { RevocationEvent } from '@seleksi/shared';
 import { PrismaService } from '../database/prisma.service';
+import { AuthMetricsService } from '../metrics/auth-metrics.service';
 import {
   RabbitMqPublishError,
   RabbitMqPublisherService,
@@ -23,6 +24,7 @@ export class OutboxPublisherService implements OnApplicationBootstrap {
   constructor(
     private readonly prisma: PrismaService,
     private readonly rabbitMqPublisher: RabbitMqPublisherService,
+    private readonly metrics: AuthMetricsService,
     configService: ConfigService,
   ) {
     this.enabled = configService.getOrThrow<boolean>(
@@ -115,6 +117,9 @@ export class OutboxPublisherService implements OnApplicationBootstrap {
         continue;
       }
 
+      const publishStartedAt = process.hrtime.bigint();
+      let publishOutcome: 'failure' | 'success' = 'failure';
+
       try {
         const event = candidate.payload as unknown as RevocationEvent;
 
@@ -143,6 +148,7 @@ export class OutboxPublisherService implements OnApplicationBootstrap {
         });
 
         publishedCount += published.count;
+        publishOutcome = 'success';
       } catch (error) {
         const failedAt = new Date();
         const retryAt = new Date(
@@ -168,6 +174,11 @@ export class OutboxPublisherService implements OnApplicationBootstrap {
         if (error instanceof RabbitMqPublishError) {
           break;
         }
+      } finally {
+        this.metrics.recordOutboxPublish(
+          publishOutcome,
+          Number(process.hrtime.bigint() - publishStartedAt) / 1_000_000_000,
+        );
       }
     }
 

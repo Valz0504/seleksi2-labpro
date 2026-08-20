@@ -128,14 +128,20 @@ describe('AppController (e2e)', () => {
     },
     auditLog: {
       create: jest.fn(),
+      groupBy: jest.fn(),
     },
     outboxEvent: {
       createMany: jest.fn(),
+      groupBy: jest.fn(),
+    },
+    eventDelivery: {
+      groupBy: jest.fn(),
     },
     $transaction: jest.fn(),
   };
   const rabbitMqPublisher = {
     checkReadiness: jest.fn(),
+    getQueueMetrics: jest.fn(),
     close: jest.fn(),
   };
   const findAuditEvent = (eventType: string) => {
@@ -431,7 +437,21 @@ describe('AppController (e2e)', () => {
       },
     );
     prisma.auditLog.create.mockResolvedValue({});
+    prisma.auditLog.groupBy.mockResolvedValue([
+      { eventType: 'LoginSucceeded', _count: { _all: 2 } },
+      { eventType: 'LoginFailed', _count: { _all: 1 } },
+    ]);
     prisma.outboxEvent.createMany.mockResolvedValue({ count: 1 });
+    prisma.outboxEvent.groupBy.mockResolvedValue([
+      { status: 'PUBLISHED', _count: { _all: 3 } },
+    ]);
+    prisma.eventDelivery.groupBy.mockResolvedValue([
+      { status: 'SUCCEEDED', _count: { _all: 6 } },
+    ]);
+    rabbitMqPublisher.getQueueMetrics.mockResolvedValue({
+      main: { messagesReady: 0, consumers: 1 },
+      deadLetter: { messagesReady: 0, consumers: 0 },
+    });
     prisma.$transaction.mockImplementation((input: unknown) => {
       if (typeof input === 'function') {
         return (input as (transaction: typeof prisma) => Promise<unknown>)(
@@ -475,6 +495,30 @@ describe('AppController (e2e)', () => {
         });
         expect(body.timestamp).toEqual(expect.any(String));
       });
+  });
+
+  it('GET /metrics exposes aggregate Prometheus metrics without identifiers', () => {
+    return request(app.getHttpServer())
+      .get('/metrics')
+      .expect(200)
+      .expect('Cache-Control', 'no-store')
+      .expect(
+        ({
+          headers,
+          text,
+        }: {
+          headers: Record<string, string>;
+          text: string;
+        }) => {
+          expect(headers['content-type']).toContain('text/plain');
+          expect(text).toContain('auth_provider_http_requests_total');
+          expect(text).toContain('auth_provider_outbox_events');
+          expect(text).toContain('auth_provider_rabbitmq_queue_messages_ready');
+          expect(text).not.toContain(activeUser.id);
+          expect(text).not.toContain(activeUser.email);
+          expect(text).not.toContain(clientSecret);
+        },
+      );
   });
 
   it('GET /health/live checks only that the process responds', () => {
@@ -567,6 +611,8 @@ describe('AppController (e2e)', () => {
         expect(body.paths).toHaveProperty('/auth/logout/browser');
         expect(body.paths).toHaveProperty('/health/live');
         expect(body.paths).toHaveProperty('/health/ready');
+        expect(body.paths).toHaveProperty('/metrics');
+        expect(body.paths).toHaveProperty('/admin/metrics');
         expect(body.paths).toHaveProperty('/admin/users');
         expect(body.paths).toHaveProperty(
           '/admin/applications/{applicationId}/rotate-secret',
@@ -578,7 +624,7 @@ describe('AppController (e2e)', () => {
         expect(body.components?.securitySchemes).toHaveProperty(
           'clientCredentials',
         );
-        expect(operationCount).toBe(36);
+        expect(operationCount).toBe(38);
         expect(
           body.components?.schemas?.['CreateUserDto']?.properties?.['password'],
         ).toMatchObject({ writeOnly: true });
@@ -802,6 +848,18 @@ describe('AppController (e2e)', () => {
     );
     expect(loginResponse.headers['set-cookie']).toEqual(expect.any(Array));
 
+    await adminAgent
+      .get('/admin/metrics')
+      .expect(200)
+      .expect(({ body }: { body: Record<string, unknown> }) => {
+        expect(body).toMatchObject({
+          dependencies: { primaryDatabase: 1, rabbitmq: 1 },
+          outbox: { PENDING: 0, PUBLISHED: 3 },
+          queues: { mainReady: 0, mainConsumers: 1, deadLetterReady: 0 },
+        });
+        expect(JSON.stringify(body)).not.toContain(activeUser.email);
+      });
+
     const logoutResponse = await adminAgent
       .post('/auth/logout/admin')
       .expect(303);
@@ -875,6 +933,10 @@ describe('AppController (e2e)', () => {
           message: 'Central session tidak ditemukan',
         },
       });
+  });
+
+  it('rejects the aggregate metrics API without an admin session', () => {
+    return request(app.getHttpServer()).get('/admin/metrics').expect(401);
   });
 
   it('rejects an authenticated non-admin user from admin APIs', async () => {
