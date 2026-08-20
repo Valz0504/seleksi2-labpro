@@ -19,7 +19,12 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  if (!isRecord(body) || (body.action !== 'start' && body.action !== 'confirm')) {
+  if (
+    !isRecord(body) ||
+    !['start', 'confirm', 'regenerate', 'disable'].includes(
+      typeof body.action === 'string' ? body.action : '',
+    )
+  ) {
     return Response.json(
       { error: { code: 'INVALID_REQUEST', message: 'Permintaan tidak valid' } },
       { status: 400, headers: NO_STORE_HEADERS },
@@ -33,26 +38,62 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const endpoint = body.action === 'start' ? '/auth/mfa/enroll/start' : '/auth/mfa/enroll/confirm';
+  if (
+    (body.action === 'regenerate' || body.action === 'disable') &&
+    (typeof body.password !== 'string' ||
+      body.password.length < 8 ||
+      body.password.length > 1024 ||
+      typeof body.code !== 'string' ||
+      !/^(?:\d{6}|[A-HJ-NP-Z2-9]{4}(?:-[A-HJ-NP-Z2-9]{4}){2})$/i.test(body.code))
+  ) {
+    return Response.json(
+      {
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'Password dan kode MFA harus diisi dengan benar',
+        },
+      },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
+
+  const endpoint =
+    body.action === 'start'
+      ? '/auth/mfa/enroll/start'
+      : body.action === 'confirm'
+        ? '/auth/mfa/enroll/confirm'
+        : body.action === 'regenerate'
+          ? '/auth/mfa/recovery/regenerate'
+          : '/auth/mfa';
+  const method = body.action === 'disable' ? 'DELETE' : 'POST';
+  const requestBody =
+    body.action === 'start'
+      ? {}
+      : body.action === 'confirm'
+        ? { code: body.code }
+        : { password: body.password, code: body.code };
 
   try {
     const response = await fetch(buildInternalAuthServerUrl(endpoint), {
-      method: 'POST',
+      method,
       headers: {
         cookie: (await cookies()).toString(),
         'content-type': 'application/json',
       },
-      body: JSON.stringify(body.action === 'start' ? {} : { code: body.code }),
+      body: JSON.stringify(requestBody),
       cache: 'no-store',
     });
     const responseBody = await response.text();
 
-    return new Response(responseBody, {
+    return new Response(response.status === 204 ? null : responseBody, {
       status: response.status,
-      headers: {
-        ...NO_STORE_HEADERS,
-        'Content-Type': response.headers.get('content-type') ?? 'application/json',
-      },
+      headers:
+        response.status === 204
+          ? NO_STORE_HEADERS
+          : {
+              ...NO_STORE_HEADERS,
+              'Content-Type': response.headers.get('content-type') ?? 'application/json',
+            },
     });
   } catch {
     return Response.json(

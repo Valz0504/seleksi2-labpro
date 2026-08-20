@@ -8,6 +8,7 @@ import { MfaEnrollment } from './mfa-enrollment';
 interface MfaStatus {
   enabled: boolean;
   enrollmentPending: boolean;
+  recoveryCodesRemaining: number;
 }
 
 function readMfaStatus(value: unknown): MfaStatus | null {
@@ -17,7 +18,9 @@ function readMfaStatus(value: unknown): MfaStatus | null {
     !('enabled' in value) ||
     typeof value.enabled !== 'boolean' ||
     !('enrollmentPending' in value) ||
-    typeof value.enrollmentPending !== 'boolean'
+    typeof value.enrollmentPending !== 'boolean' ||
+    !('recoveryCodesRemaining' in value) ||
+    typeof value.recoveryCodesRemaining !== 'number'
   ) {
     return null;
   }
@@ -25,6 +28,7 @@ function readMfaStatus(value: unknown): MfaStatus | null {
   return {
     enabled: value.enabled,
     enrollmentPending: value.enrollmentPending,
+    recoveryCodesRemaining: value.recoveryCodesRemaining,
   };
 }
 

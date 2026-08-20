@@ -22,11 +22,11 @@ export default async function MfaLoginPage({ searchParams }: MfaLoginPageProps) 
           Verifikasi dua langkah
         </span>
         <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-950">
-          Masukkan kode authenticator
+          Masukkan faktor kedua
         </h1>
         <p className="mt-3 leading-7 text-slate-600">
-          Buka aplikasi authenticator yang terhubung dengan akunmu, lalu masukkan kode enam digit
-          yang sedang aktif.
+          Masukkan kode enam digit dari aplikasi authenticator. Jika perangkat tidak tersedia,
+          gunakan salah satu recovery code yang belum pernah dipakai.
         </p>
 
         {hasVerificationError ? (
@@ -34,7 +34,8 @@ export default async function MfaLoginPage({ searchParams }: MfaLoginPageProps) 
             className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-800"
             role="alert"
           >
-            Kode tidak valid atau waktu verifikasi telah berakhir. Mulai login kembali jika perlu.
+            Kode tidak valid, sudah pernah dipakai, atau waktu verifikasi telah berakhir. Mulai
+            login kembali jika perlu.
           </div>
         ) : null}
 
@@ -44,18 +45,17 @@ export default async function MfaLoginPage({ searchParams }: MfaLoginPageProps) 
           method="post"
         >
           <label className="mb-2 text-sm font-semibold text-slate-700" htmlFor="mfa-code">
-            Kode enam digit
+            Kode authenticator atau recovery code
           </label>
           <input
             autoComplete="one-time-code"
             autoFocus
-            className="h-12 rounded-lg border border-slate-300 px-3 font-mono text-xl tracking-[0.35em] text-slate-950 outline-none transition focus:border-blue-600 focus:ring-3 focus:ring-blue-600/15"
+            autoCapitalize="characters"
+            className="h-12 rounded-lg border border-slate-300 px-3 font-mono text-lg uppercase text-slate-950 outline-none transition focus:border-blue-600 focus:ring-3 focus:ring-blue-600/15"
             id="mfa-code"
-            inputMode="numeric"
-            maxLength={6}
+            maxLength={14}
             name="code"
-            pattern="\d{6}"
-            placeholder="000000"
+            placeholder="000000 atau XXXX-XXXX-XXXX"
             required
           />
 
