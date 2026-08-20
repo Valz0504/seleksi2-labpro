@@ -6,11 +6,13 @@ import { SessionCookieService } from './session-cookie.service';
 import { CentralSessionService } from './central-session.service';
 import { MfaChallengeCookieService } from '../mfa/mfa-challenge-cookie.service';
 import { MfaChallengeService } from '../mfa/mfa-challenge.service';
+import { MfaController } from '../mfa/mfa.controller';
+import { MfaEnrollmentService } from '../mfa/mfa-enrollment.service';
 import { MfaSecretCryptoService } from '../mfa/mfa-secret-crypto.service';
 import { TotpService } from '../mfa/totp.service';
 
 @Module({
-  controllers: [AuthController],
+  controllers: [AuthController, MfaController],
   providers: [
     AuthService,
     CentralSessionService,
@@ -18,6 +20,7 @@ import { TotpService } from '../mfa/totp.service';
     SessionCookieService,
     MfaChallengeCookieService,
     MfaChallengeService,
+    MfaEnrollmentService,
     MfaSecretCryptoService,
     TotpService,
   ],

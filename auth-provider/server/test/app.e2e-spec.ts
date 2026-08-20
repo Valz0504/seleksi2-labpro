@@ -79,10 +79,10 @@ describe('AppController (e2e)', () => {
     | undefined;
   let currentMfaRecord:
     | {
-        secretCiphertext: Buffer;
-        secretIv: Buffer;
-        secretAuthTag: Buffer;
-        enabledAt: Date;
+        secretCiphertext: Uint8Array;
+        secretIv: Uint8Array;
+        secretAuthTag: Uint8Array;
+        enabledAt: Date | null;
         lastUsedTimeStep: bigint | null;
       }
     | undefined;
@@ -155,6 +155,8 @@ describe('AppController (e2e)', () => {
       updateMany: jest.fn(),
     },
     userMfaTotp: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
       updateMany: jest.fn(),
     },
     auditLog: {
@@ -206,6 +208,7 @@ describe('AppController (e2e)', () => {
       .findLast((event) => event.eventType === eventType);
   };
   const getPersistedMfaChallenge = () => persistedMfaChallenge;
+  const getCurrentMfaRecord = () => currentMfaRecord;
   const findOutboxEvent = (eventType: string) => {
     const calls = prisma.outboxEvent.createMany.mock.calls as unknown as Array<
       [
@@ -557,8 +560,42 @@ describe('AppController (e2e)', () => {
         return Promise.resolve({ count: 0 });
       },
     );
+    prisma.userMfaTotp.findUnique.mockImplementation(() =>
+      Promise.resolve(currentMfaRecord ?? null),
+    );
+    prisma.userMfaTotp.upsert.mockImplementation(
+      ({
+        create,
+        update,
+      }: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      }) => {
+        const data = currentMfaRecord ? update : create;
+
+        currentMfaRecord = {
+          secretCiphertext: data['secretCiphertext'] as Uint8Array,
+          secretIv: data['secretIv'] as Uint8Array,
+          secretAuthTag: data['secretAuthTag'] as Uint8Array,
+          enabledAt: currentMfaRecord?.enabledAt ?? null,
+          lastUsedTimeStep: null,
+        };
+
+        return Promise.resolve(currentMfaRecord);
+      },
+    );
     prisma.userMfaTotp.updateMany.mockImplementation(
-      ({ data }: { data: { lastUsedTimeStep: bigint } }) => {
+      ({ data }: { data: { enabledAt?: Date; lastUsedTimeStep: bigint } }) => {
+        if (data.enabledAt) {
+          if (!currentMfaRecord || currentMfaRecord.enabledAt !== null) {
+            return Promise.resolve({ count: 0 });
+          }
+
+          currentMfaRecord.enabledAt = data.enabledAt;
+          currentMfaRecord.lastUsedTimeStep = data.lastUsedTimeStep;
+          return Promise.resolve({ count: 1 });
+        }
+
         if (
           !currentMfaRecord ||
           (currentMfaRecord.lastUsedTimeStep !== null &&
@@ -784,7 +821,10 @@ describe('AppController (e2e)', () => {
         );
         expect(body.paths).toHaveProperty('/auth/login/mfa');
         expect(body.paths).toHaveProperty('/auth/login/mfa/continue');
-        expect(operationCount).toBe(40);
+        expect(body.paths).toHaveProperty('/auth/mfa/status');
+        expect(body.paths).toHaveProperty('/auth/mfa/enroll/start');
+        expect(body.paths).toHaveProperty('/auth/mfa/enroll/confirm');
+        expect(operationCount).toBe(43);
         expect(
           body.components?.schemas?.['CreateUserDto']?.properties?.['password'],
         ).toMatchObject({ writeOnly: true });
@@ -827,6 +867,90 @@ describe('AppController (e2e)', () => {
       .post('/auth/login')
       .send({ email: 'not-an-email', password: '', unexpected: true })
       .expect(400);
+  });
+
+  it('enrolls TOTP only after the first authenticator code is confirmed', async () => {
+    const enrollmentAgent = request.agent(app.getHttpServer());
+    currentMfaRecord = undefined;
+    persistedSession = undefined;
+
+    try {
+      await request(app.getHttpServer()).get('/auth/mfa/status').expect(401);
+      await enrollmentAgent
+        .post('/auth/login')
+        .send({ email: activeUser.email, password: 'correct-password' })
+        .expect(200);
+      await enrollmentAgent.get('/auth/mfa/status').expect(200).expect({
+        enabled: false,
+        enrollmentPending: false,
+      });
+
+      const startResponse = await enrollmentAgent
+        .post('/auth/mfa/enroll/start')
+        .send({})
+        .expect(200)
+        .expect('Cache-Control', 'no-store');
+      const startBody = startResponse.body as unknown;
+
+      if (
+        typeof startBody !== 'object' ||
+        startBody === null ||
+        !('manualKey' in startBody) ||
+        typeof startBody.manualKey !== 'string' ||
+        !('provisioningUri' in startBody) ||
+        typeof startBody.provisioningUri !== 'string' ||
+        !('qrCodeDataUrl' in startBody) ||
+        typeof startBody.qrCodeDataUrl !== 'string'
+      ) {
+        throw new Error('Enrollment response was invalid');
+      }
+
+      expect(startBody.provisioningUri).toMatch(/^otpauth:\/\/totp\//);
+      expect(startBody.qrCodeDataUrl).toMatch(/^data:image\/png;base64,/);
+      expect(getCurrentMfaRecord()?.enabledAt).toBeNull();
+
+      const validCode = app.get(TotpService).generateToken(startBody.manualKey);
+      const wrongCode = validCode === '000000' ? '000001' : '000000';
+
+      await enrollmentAgent
+        .post('/auth/mfa/enroll/confirm')
+        .send({ code: wrongCode })
+        .expect(400)
+        .expect({
+          error: {
+            code: 'MFA_ENROLLMENT_CODE_INVALID',
+            message: 'Kode authenticator tidak valid',
+          },
+        });
+      expect(getCurrentMfaRecord()?.enabledAt).toBeNull();
+
+      await enrollmentAgent
+        .post('/auth/mfa/enroll/confirm')
+        .send({ code: validCode })
+        .expect(200)
+        .expect({ enabled: true });
+      expect(getCurrentMfaRecord()?.enabledAt).toEqual(expect.any(Date));
+      expect(findLatestAuditEvent('mfa_enrolled')).toMatchObject({
+        actorId: activeUser.id,
+        userId: activeUser.id,
+        result: 'SUCCESS',
+        metadata: { factor: 'totp' },
+      });
+      expect(JSON.stringify(prisma.auditLog.create.mock.calls)).not.toContain(
+        startBody.manualKey,
+      );
+      expect(JSON.stringify(prisma.auditLog.create.mock.calls)).not.toContain(
+        validCode,
+      );
+
+      await enrollmentAgent.get('/auth/mfa/status').expect(200).expect({
+        enabled: true,
+        enrollmentPending: false,
+      });
+      await enrollmentAgent.post('/auth/mfa/enroll/start').send({}).expect(409);
+    } finally {
+      currentMfaRecord = undefined;
+    }
   });
 
   it('does not create a central session until active MFA is verified', async () => {
@@ -884,7 +1008,7 @@ describe('AppController (e2e)', () => {
         });
       expect(getPersistedMfaChallenge()?.attemptCount).toBe(1);
       expect(persistedSession).toBeUndefined();
-      expect(findAuditEvent('mfa_failed')).toMatchObject({
+      expect(findLatestAuditEvent('mfa_failed')).toMatchObject({
         eventType: 'mfa_failed',
         userId: activeUser.id,
         result: 'FAILED',
