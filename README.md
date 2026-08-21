@@ -3,6 +3,8 @@
 - **Nama:** Emilio Justin
 - **NIM:** 13524043
 
+-----
+
 ## Cara menjalankan sistem
 
 Seluruh sistem dijalankan menggunakan Docker Compose. Node.js dan pnpm tidak perlu dipasang pada host.
@@ -94,6 +96,8 @@ Command tersebut mempertahankan data pada Docker volume.
 
 Port mengikuti konfigurasi root `.env`.
 
+-----
+
 ## Arsitektur dan alur
 
 ```text
@@ -139,6 +143,8 @@ Browser
 6. Aplikasi mencabut local session secara idempotent menggunakan tabel `processed_events`.
 7. Delivery gagal menjalani retry dengan exponential backoff; setelah batas terlampaui delivery masuk Dead-Letter Queue.
 
+-----
+
 ## Keputusan teknis
 
 ### Opaque token
@@ -183,6 +189,8 @@ Mekanisme shared secret dipilih karena sederhana dan cukup untuk lingkungan loka
 
 Penghapusan relasi akses memicu evaluasi ulang policy. Session hanya dicabut ketika user benar-benar kehilangan jalur `ALLOW` terakhir.
 
+-----
+
 ## Technology stack
 
 - Node.js 22, melalui image `node:22-alpine`;
@@ -205,6 +213,8 @@ Penghapusan relasi akses memicu evaluasi ulang policy. Session hanya dicabut ket
 - ESLint 9.39.5;
 - Prettier 3.9.6;
 - Docker Compose v2.
+
+-----
 
 ## Daftar Endpoint dan Route
 
@@ -329,15 +339,26 @@ Mutasi pada Control Panel dilakukan melalui Next.js Server Actions dari halaman 
 - `GET /health` — health check Sync Worker.
 - `GET /metrics` — metrics consumer dan delivery dalam format Prometheus.
 
+-----
+
 ## Bonus yang Dikerjakan
 
 ### B01 — Multi-Factor Authentication
 
 Auth Provider memakai TOTP enam digit sebagai faktor kedua. Secret disimpan menggunakan AES-256-GCM, sedangkan pending challenge dan recovery code hanya disimpan sebagai hash. User dapat enrollment, menyimpan recovery code sekali, regenerate, atau disable pada `/security/mfa`. Setelah MFA aktif, login API, OAuth, dan admin baru menerbitkan central session setelah TOTP atau recovery code valid; setiap recovery code hanya dapat dipakai sekali.
 
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 23 00" src="https://github.com/user-attachments/assets/75946dd1-7401-4aad-9b48-5655f895d176" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 23 17" src="https://github.com/user-attachments/assets/3d61c891-9f10-4ddb-b645-4ed118008264" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 13 13" src="https://github.com/user-attachments/assets/93ec6c4b-1b55-4715-b6a7-d502af9fd390" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 25 58" src="https://github.com/user-attachments/assets/ea4d5085-b94e-464a-bbf0-3a085268b7b9" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 27 39" src="https://github.com/user-attachments/assets/4ffb4c58-d36b-45eb-b317-03c4a2689566" />
+
 ### B02 — Observability
 
 Auth Server dan Sync Worker menyediakan metrics Prometheus untuk HTTP rate/error/duration, auth, outbox, delivery, dependency, serta kondisi RabbitMQ sebenarnya. Control Panel menyediakan dashboard administrator pada `GET /admin/metrics` yang menampilkan latency, request/error rate, queue depth, DLQ, status dependency, dan event processing dengan refresh otomatis setiap lima detik.
+
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 18 14" src="https://github.com/user-attachments/assets/7c391c56-5bdb-4cdd-bdba-305328b3f50c" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 18 31" src="https://github.com/user-attachments/assets/dc98d93f-30ee-4a31-a75f-3360322f38bf" />
 
 ### B03 — Liveness dan Readiness Probe
 
@@ -355,3 +376,68 @@ Auth Server dan Sync Worker menangani `SIGTERM`/`SIGINT` sebelum proses berhenti
 - Sync Worker membatalkan consumer, menunggu message aktif, lalu mengembalikan message yang melewati timeout ke queue;
 - koneksi RabbitMQ dan database ditutup setelah drain;
 - timeout aplikasi default 10 detik, sedangkan Docker memberi grace period 15 detik.
+
+-----
+
+## Screenshot 
+
+*Halaman Awal App A dan B*
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 11 38" src="https://github.com/user-attachments/assets/30c9b84e-f3e6-499e-9431-f74297c9ac12" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 11 42" src="https://github.com/user-attachments/assets/ef8c0918-0ba1-4d09-b13d-2c0d4d99e3b0" />
+
+*Halaman Form Login*
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 12 12" src="https://github.com/user-attachments/assets/466ee07e-6928-4206-830c-bfc1e290f6ea" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 12 20" src="https://github.com/user-attachments/assets/36ec5a37-8715-4c62-b1df-996bb8e550b6" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 12 52" src="https://github.com/user-attachments/assets/17e488ee-2060-471a-a5fe-dffe2b30f292" />
+
+*Homepage Auth Provider (setelah login)*
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 29 29" src="https://github.com/user-attachments/assets/4fd4cbd6-1d50-41df-aa40-ee0b5129fac1" />
+
+*Halaman Control Panel Dashboard*
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 13 38" src="https://github.com/user-attachments/assets/06ad44b4-192c-4ba0-a78b-092856d63199" />
+
+*Halaman Control Panel User, Tambah User, dan Detail User*
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 14 09" src="https://github.com/user-attachments/assets/3ad4f740-4819-41a6-9819-f9c7f68ca242" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 14 36" src="https://github.com/user-attachments/assets/b7001bc0-e9ed-438d-9b94-86df3436db28" />
+<img width="1710" height="1072" alt="image" src="https://github.com/user-attachments/assets/7e751d18-169e-48be-9a70-e570127b4ca2" />
+<img width="1710" height="1072" alt="image" src="https://github.com/user-attachments/assets/35144b71-087b-4a31-a8b8-29500574212c" />
+<img width="1710" height="1072" alt="image" src="https://github.com/user-attachments/assets/246ba553-f7d1-4913-9fcc-0da1f82ba72e" />
+
+*Halaman Control Panel Group, Tambah Group, dan Detail Group*
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 15 32" src="https://github.com/user-attachments/assets/ddd92764-5a1a-4c0e-bd8a-0784a44c9cf7" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 15 43" src="https://github.com/user-attachments/assets/ee4faeac-34e0-4b3e-b3a5-b030c3dfe977" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 16 07" src="https://github.com/user-attachments/assets/9cc3a8f4-656b-43c3-9898-ad399612d063" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 16 21" src="https://github.com/user-attachments/assets/e4bf339a-1da4-4e8f-8c74-f56df8cbab2d" />
+
+*Halaman Control Panel Application, Daftar Application, dan Detail Application*
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 16 48" src="https://github.com/user-attachments/assets/be2bddd3-6908-42ff-9950-008f1776b100" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 17 04" src="https://github.com/user-attachments/assets/032636cc-17ea-4867-979a-3f8f1353352e" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 17 21" src="https://github.com/user-attachments/assets/5900d6a4-a47f-4a5d-93ce-c0031b4b96c8" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 17 35" src="https://github.com/user-attachments/assets/128d6cf7-cc3a-4cbe-b9f6-2e8a7592b7fd" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 17 43" src="https://github.com/user-attachments/assets/e06810e4-0619-41a9-8b9a-a52b7a955b22" />
+
+*Halaman App A dan B*
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 21 30" src="https://github.com/user-attachments/assets/98750ce7-2a70-4437-b5fa-efdef3249c4a" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 21 45" src="https://github.com/user-attachments/assets/8a934304-68d9-427a-b7ee-f63126f2d5f0" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 21 57" src="https://github.com/user-attachments/assets/a643cd51-d5f6-46a9-a691-88fe56340792" />
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 22 05" src="https://github.com/user-attachments/assets/ead7efb9-0cdf-4e6f-abcb-d86ce38beaf0" />
+
+*Tampilan Logout Local Session*
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 24 00" src="https://github.com/user-attachments/assets/ccceadff-f35b-4d58-98e2-58a7fc8bb229" />
+
+*Tampilan Central Session dicabut menyebabkan local session dicabut*
+<img width="1710" height="1072" alt="Screenshot 2026-08-21 at 11 24 38" src="https://github.com/user-attachments/assets/7c1dbab5-a5d4-4503-a18b-e9cdb4cd9156" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+
