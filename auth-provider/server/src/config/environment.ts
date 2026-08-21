@@ -11,6 +11,9 @@ const DEFAULT_RABBITMQ_CONNECTION_TIMEOUT_MS = 5_000;
 const DEFAULT_RABBITMQ_HEARTBEAT_SECONDS = 10;
 const DEFAULT_RABBITMQ_PUBLISH_CONFIRM_TIMEOUT_MS = 10_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
+const DEFAULT_MFA_CHALLENGE_COOKIE_NAME = 'mfa_challenge';
+const DEFAULT_MFA_CHALLENGE_TTL_SECONDS = 5 * 60;
+const DEFAULT_MFA_CHALLENGE_MAX_ATTEMPTS = 5;
 
 function requireHttpUrl(
   environment: Record<string, unknown>,
@@ -115,6 +118,7 @@ export function validateEnvironment(
 ): Record<string, unknown> {
   const databaseUrl = requireString(environment, 'DATABASE_URL');
   const cookieSecret = requireString(environment, 'SSO_COOKIE_SECRET');
+  const mfaEncryptionKey = requireString(environment, 'MFA_ENCRYPTION_KEY');
   const authLoginUrl = requireHttpUrl(environment, 'AUTH_LOGIN_URL');
   const controlPanelAdminLoginUrl = requireHttpUrl(
     environment,
@@ -137,6 +141,11 @@ export function validateEnvironment(
     environment['SSO_COOKIE_NAME'].length > 0
       ? environment['SSO_COOKIE_NAME']
       : DEFAULT_SSO_COOKIE_NAME;
+  const mfaChallengeCookieName =
+    typeof environment['MFA_CHALLENGE_COOKIE_NAME'] === 'string' &&
+    environment['MFA_CHALLENGE_COOKIE_NAME'].length > 0
+      ? environment['MFA_CHALLENGE_COOKIE_NAME']
+      : DEFAULT_MFA_CHALLENGE_COOKIE_NAME;
 
   if (cookieSecret.length < 32) {
     throw new Error('SSO_COOKIE_SECRET must contain at least 32 characters');
@@ -148,6 +157,24 @@ export function validateEnvironment(
     );
   }
 
+  if (!/^[0-9a-fA-F]{64}$/.test(mfaEncryptionKey)) {
+    throw new Error(
+      'MFA_ENCRYPTION_KEY must contain exactly 64 hexadecimal characters',
+    );
+  }
+
+  if (!/^[A-Za-z0-9_-]+$/.test(mfaChallengeCookieName)) {
+    throw new Error(
+      'MFA_CHALLENGE_COOKIE_NAME may only contain letters, numbers, underscores, and hyphens',
+    );
+  }
+
+  if (mfaChallengeCookieName === cookieName) {
+    throw new Error(
+      'MFA_CHALLENGE_COOKIE_NAME must differ from SSO_COOKIE_NAME',
+    );
+  }
+
   return {
     ...environment,
     DATABASE_URL: databaseUrl,
@@ -156,6 +183,18 @@ export function validateEnvironment(
     CONTROL_PANEL_ADMIN_DASHBOARD_URL: controlPanelAdminDashboardUrl,
     SSO_COOKIE_SECRET: cookieSecret,
     SSO_COOKIE_NAME: cookieName,
+    MFA_ENCRYPTION_KEY: mfaEncryptionKey,
+    MFA_CHALLENGE_COOKIE_NAME: mfaChallengeCookieName,
+    MFA_CHALLENGE_TTL_SECONDS: parsePositiveInteger(
+      environment['MFA_CHALLENGE_TTL_SECONDS'],
+      'MFA_CHALLENGE_TTL_SECONDS',
+      DEFAULT_MFA_CHALLENGE_TTL_SECONDS,
+    ),
+    MFA_CHALLENGE_MAX_ATTEMPTS: parsePositiveInteger(
+      environment['MFA_CHALLENGE_MAX_ATTEMPTS'],
+      'MFA_CHALLENGE_MAX_ATTEMPTS',
+      DEFAULT_MFA_CHALLENGE_MAX_ATTEMPTS,
+    ),
     SSO_COOKIE_SECURE: parseBoolean(
       environment['SSO_COOKIE_SECURE'],
       'SSO_COOKIE_SECURE',

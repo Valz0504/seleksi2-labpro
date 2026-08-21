@@ -27,6 +27,7 @@ Ganti seluruh nilai `replace-with-*` di dalam `.env`, terutama:
 - `RABBITMQ_PASSWORD`;
 - `SSO_COOKIE_SECRET`, minimal 32 karakter;
 - `INTERNAL_SERVICE_SECRET`, minimal 16 karakter;
+- `MFA_ENCRYPTION_KEY`, tepat 64 karakter hexadecimal (32 byte);
 - `SEED_ADMIN_PASSWORD`;
 - `APP_A_CLIENT_SECRET`, minimal 16 karakter;
 - `APP_B_CLIENT_SECRET`, minimal 16 karakter.
@@ -49,7 +50,7 @@ Compose akan menjalankan proses berikut secara otomatis:
 
 1. Primary PostgreSQL, Local PostgreSQL, dan RabbitMQ dimulai;
 2. migration Primary Database dijalankan;
-3. seed administrator, group, OAuth client, redirect URI, membership, dan policy dijalankan;
+3. seed user administrator, group `control-panel-admins`, OAuth client, redirect URI, membership, dan policy dijalankan;
 4. migration database App A dan App B dijalankan;
 5. Auth Provider, Sync Worker, Control Panel, App A, dan App B dimulai setelah dependency siap.
 
@@ -67,7 +68,7 @@ Service aplikasi seharusnya berstatus `healthy`. Service migration dan seed bers
 - email administrator: `admin@example.com`;
 - password administrator: nilai `SEED_ADMIN_PASSWORD` pada `.env`.
 
-Administrator hasil seed sudah menjadi anggota group App A dan App B sehingga dapat langsung mencoba alur SSO pada kedua aplikasi.
+User hasil seed menjadi anggota `control-panel-admins`, App A, dan App B sehingga dapat mengakses Control Panel sekaligus langsung mencoba SSO pada kedua aplikasi.
 
 ### 4. Hentikan sistem
 
@@ -177,7 +178,7 @@ Mekanisme shared secret dipilih karena sederhana dan cukup untuk lingkungan loka
 
 - User dan application memakai state transition menjadi `INACTIVE` agar referensi serta audit history tetap tersedia.
 - Session dan access token memakai status `REVOKED` atau `EXPIRED` agar alasan revocation dapat ditelusuri.
-- Group, membership, policy, dan redirect URI dapat dihapus secara transaksional karena merupakan konfigurasi.
+- Group biasa, membership, policy, dan redirect URI dapat dihapus secara transaksional karena merupakan konfigurasi. Group sistem `control-panel-admins` dilindungi dari rename dan delete.
 - Audit log dan processed event dipertahankan untuk audit serta idempotency.
 
 Penghapusan relasi akses memicu evaluasi ulang policy. Session hanya dicabut ketika user benar-benar kehilangan jalur `ALLOW` terakhir.
@@ -197,6 +198,8 @@ Penghapusan relasi akses memicu evaluasi ulang policy. Session hanya dicabut ket
 - PostgreSQL driver `pg` 8.22.0;
 - RabbitMQ client `amqplib` 2.0.1;
 - Prometheus client `prom-client` 15.1.3;
+- TOTP library `otpauth` 9.5.1;
+- QR generator `qrcode` 1.5.4;
 - Argon2 0.45.1;
 - Jest 30.4.2;
 - ESLint 9.39.5;
@@ -220,13 +223,20 @@ Endpoint dasar:
 
 Authentication dan central session:
 
-- `POST /auth/login` — login langsung dan membuat central session;
-- `POST /auth/login/continue` — login untuk melanjutkan authorization request;
-- `POST /auth/login/admin` — login administrator;
+- `POST /auth/login` — login langsung; membuat central session atau pending MFA challenge;
+- `POST /auth/login/continue` — login untuk melanjutkan authorization request, termasuk MFA gate;
+- `POST /auth/login/admin` — login anggota `control-panel-admins`, termasuk MFA gate;
+- `POST /auth/login/mfa` — memverifikasi TOTP atau recovery code untuk login API yang masih pending;
+- `POST /auth/login/mfa/continue` — memverifikasi TOTP/recovery code lalu melanjutkan OAuth atau login admin;
+- `GET /auth/mfa/status` — membaca status MFA dan jumlah recovery code tersisa;
+- `POST /auth/mfa/enroll/start` — membuat enrollment TOTP dan QR sementara;
+- `POST /auth/mfa/enroll/confirm` — mengaktifkan MFA dan mengembalikan recovery code satu kali;
+- `POST /auth/mfa/recovery/regenerate` — mengganti seluruh recovery code setelah reauthentication;
+- `DELETE /auth/mfa` — menonaktifkan MFA setelah reauthentication;
 - `GET /auth/session` — membaca central session aktif;
 - `POST /auth/logout` — mencabut central session melalui API;
 - `POST /auth/logout/browser` — global logout dari browser;
-- `POST /auth/logout/admin` — logout administrator.
+- `POST /auth/logout/admin` — logout dari Control Panel.
 
 OAuth:
 
@@ -267,12 +277,15 @@ Administrasi application:
 
 Observability administrator:
 
-- `GET /admin/metrics` — snapshot JSON agregat untuk dashboard metrics; membutuhkan central session administrator.
+- `GET /admin/metrics` — snapshot JSON agregat untuk dashboard metrics; membutuhkan central session dan membership `control-panel-admins`.
 
 ### Control Panel — http://localhost:3000
 
 - `GET /` — status central session dan global logout;
 - `GET /login` — login untuk melanjutkan OAuth;
+- `GET /login/mfa` — form TOTP/recovery code untuk menyelesaikan login browser;
+- `GET /security/mfa` — enrollment, recovery code, dan pengelolaan MFA pribadi;
+- `POST /api/mfa/enrollment` — proxy same-origin untuk enrollment, regenerate, dan disable MFA;
 - `GET /admin/login` — login administrator;
 - `GET /admin` — dashboard administrator;
 - `GET /admin/users` — daftar user;
@@ -317,6 +330,10 @@ Mutasi pada Control Panel dilakukan melalui Next.js Server Actions dari halaman 
 - `GET /metrics` — metrics consumer dan delivery dalam format Prometheus.
 
 ## Bonus yang Dikerjakan
+
+### B01 — Multi-Factor Authentication
+
+Auth Provider memakai TOTP enam digit sebagai faktor kedua. Secret disimpan menggunakan AES-256-GCM, sedangkan pending challenge dan recovery code hanya disimpan sebagai hash. User dapat enrollment, menyimpan recovery code sekali, regenerate, atau disable pada `/security/mfa`. Setelah MFA aktif, login API, OAuth, dan admin baru menerbitkan central session setelah TOTP atau recovery code valid; setiap recovery code hanya dapat dipakai sekali.
 
 ### B02 — Observability
 

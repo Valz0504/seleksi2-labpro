@@ -8,7 +8,7 @@ export interface PublicSession {
     id: string;
     name: string;
     email: string;
-    role: 'ADMIN' | 'USER';
+    canAccessControlPanel: boolean;
   };
   session: {
     id: string;
@@ -30,10 +30,6 @@ function isDateString(value: unknown): value is string {
   return typeof value === 'string' && !Number.isNaN(Date.parse(value));
 }
 
-function isRole(value: unknown): value is PublicSession['user']['role'] {
-  return value === 'ADMIN' || value === 'USER';
-}
-
 function isNullableDateString(value: unknown): value is string | null {
   return value === null || isDateString(value);
 }
@@ -48,7 +44,7 @@ function readPublicSession(value: unknown): PublicSession | null {
     typeof user.id !== 'string' ||
     typeof user.name !== 'string' ||
     typeof user.email !== 'string' ||
-    !isRole(user.role) ||
+    typeof user.canAccessControlPanel !== 'boolean' ||
     typeof session.id !== 'string' ||
     session.status !== 'ACTIVE' ||
     !isDateString(session.createdAt) ||
@@ -63,7 +59,7 @@ function readPublicSession(value: unknown): PublicSession | null {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role,
+      canAccessControlPanel: user.canAccessControlPanel,
     },
     session: {
       id: session.id,

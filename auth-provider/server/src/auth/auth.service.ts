@@ -1,58 +1,32 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import {
-  generateOpaqueToken,
-  hashOpaqueToken,
-} from '../common/security/opaque-token';
+import { hashOpaqueToken } from '../common/security/opaque-token';
 import { verifyPassword } from '../common/security/password';
 import { PrismaService } from '../database/prisma.service';
 import { OutboxEventService } from '../event-processing/outbox-event.service';
+import { MfaChallengeService } from '../mfa/mfa-challenge.service';
+import { CentralSessionService } from './central-session.service';
+import { ControlPanelAccessService } from './control-panel-access.service';
+import type {
+  CurrentSession,
+  LoginRequirements,
+  LoginResult,
+  RequestContext,
+  SessionUser,
+} from './auth.types';
+
+export type { CurrentSession } from './auth.types';
 
 const DUMMY_PASSWORD_HASH =
   '$argon2id$v=19$m=19456,p=1,t=2$XDyNdawOPXncbz5b8iOaqg$OyX7SkbwX0qefYtwDIdiOtu9qTpwjpZp9ggu78Jn6ZY';
-
-interface RequestContext {
-  ipAddress?: string;
-  userAgent?: string;
-}
-
-interface LoginRequirements {
-  requiredRole?: SessionUser['role'];
-}
-
-export interface SessionUser {
-  id: string;
-  name: string;
-  email: string;
-  role: 'ADMIN' | 'USER';
-}
-
-export interface SessionDetails {
-  id: string;
-  status: 'ACTIVE' | 'EXPIRED' | 'REVOKED';
-  createdAt: Date;
-  expiresAt: Date;
-}
-
-export interface LoginResult {
-  sessionToken: string;
-  user: SessionUser;
-  session: SessionDetails;
-}
-
-export interface CurrentSession {
-  user: SessionUser;
-  session: SessionDetails & {
-    lastActivityAt: Date | null;
-  };
-}
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly configService: ConfigService,
     private readonly outboxEventService: OutboxEventService,
+    private readonly mfaChallengeService: MfaChallengeService,
+    private readonly centralSessionService: CentralSessionService,
+    private readonly controlPanelAccessService: ControlPanelAccessService,
   ) {}
 
   async login(
@@ -70,7 +44,7 @@ export class AuthService {
         email: true,
         passwordHash: true,
         status: true,
-        role: true,
+        mfaTotp: { select: { enabledAt: true } },
       },
     });
     const passwordMatches = await verifyPassword(
@@ -78,12 +52,16 @@ export class AuthService {
       password,
     );
 
+    const credentialsAreValid =
+      user !== null && passwordMatches && user.status === 'ACTIVE';
+    const canAccessControlPanel = credentialsAreValid
+      ? await this.controlPanelAccessService.canAccess(user.id)
+      : false;
+
     if (
       !user ||
-      !passwordMatches ||
-      user.status !== 'ACTIVE' ||
-      (requirements.requiredRole !== undefined &&
-        user.role !== requirements.requiredRole)
+      !credentialsAreValid ||
+      (requirements.requireControlPanelAccess && !canAccessControlPanel)
     ) {
       await this.prisma.auditLog.create({
         data: {
@@ -98,55 +76,50 @@ export class AuthService {
       throw this.invalidCredentialsException();
     }
 
-    const sessionToken = generateOpaqueToken();
-    const now = new Date();
-    const ttlSeconds = this.configService.getOrThrow<number>(
-      'SSO_SESSION_TTL_SECONDS',
-    );
-    const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
-    const session = await this.prisma.$transaction(async (transaction) => {
-      const createdSession = await transaction.ssoSession.create({
-        data: {
-          userId: user.id,
-          sessionTokenHash: hashOpaqueToken(sessionToken),
-          expiresAt,
-          lastActivityAt: now,
-          ipAddress: context.ipAddress,
-          userAgent: context.userAgent,
-        },
-        select: {
-          id: true,
-          status: true,
-          createdAt: true,
-          expiresAt: true,
-        },
-      });
-
-      await transaction.auditLog.create({
-        data: {
-          eventType: 'LoginSucceeded',
-          actorId: user.id,
-          userId: user.id,
-          sessionId: createdSession.id,
-          result: 'SUCCESS',
-          metadata: { authenticationMethod: 'password' },
-          ipAddress: context.ipAddress,
-        },
-      });
-
-      return createdSession;
-    });
-
-    return {
-      sessionToken,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-      session,
+    const sessionUser: SessionUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      canAccessControlPanel,
     };
+
+    if (user.mfaTotp?.enabledAt != null) {
+      const intent = requirements.intent ?? { type: 'API' as const };
+      const challenge = await this.mfaChallengeService.start(
+        user.id,
+        intent.type,
+        intent.type === 'OAUTH' ? intent.returnTo : null,
+      );
+
+      return {
+        status: 'mfa_required',
+        challengeToken: challenge.challengeToken,
+        expiresAt: challenge.expiresAt,
+      };
+    }
+
+    return this.prisma.$transaction((transaction) =>
+      this.centralSessionService.issue(
+        transaction,
+        sessionUser,
+        context,
+        'password',
+      ),
+    );
+  }
+
+  completeMfaLogin(
+    challengeToken: string,
+    code: string,
+    allowedIntents: readonly ('API' | 'OAUTH' | 'ADMIN')[],
+    context: RequestContext,
+  ) {
+    return this.mfaChallengeService.complete(
+      challengeToken,
+      code,
+      allowedIntents,
+      context,
+    );
   }
 
   async getCurrentSession(sessionToken: string): Promise<CurrentSession> {
@@ -166,7 +139,6 @@ export class AuthService {
             id: true,
             name: true,
             email: true,
-            role: true,
             status: true,
           },
         },
@@ -213,12 +185,15 @@ export class AuthService {
       throw this.invalidSessionException();
     }
 
+    const canAccessControlPanel =
+      await this.controlPanelAccessService.canAccess(session.user.id);
+
     return {
       user: {
         id: session.user.id,
         name: session.user.name,
         email: session.user.email,
-        role: session.user.role,
+        canAccessControlPanel,
       },
       session: {
         id: session.id,

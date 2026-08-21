@@ -43,7 +43,8 @@ import { UpdateApplicationDto } from './dto/update-application.dto';
 @ApiCookieAuth('centralSession')
 @ApiUnauthorizedResponse({ description: 'Central session is invalid.' })
 @ApiForbiddenResponse({
-  description: 'The authenticated user is not an administrator.',
+  description:
+    'The authenticated user is not a member of the Control Panel administrator group.',
 })
 export class AdminApplicationsController {
   constructor(private readonly applicationsService: AdminApplicationsService) {}

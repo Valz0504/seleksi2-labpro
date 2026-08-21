@@ -7,7 +7,7 @@ export interface AdminSession {
     id: string;
     name: string;
     email: string;
-    role: 'ADMIN' | 'USER';
+    canAccessControlPanel: boolean;
   };
   session: {
     id: string;
@@ -29,7 +29,6 @@ export interface AdminUser {
   name: string;
   email: string;
   status: 'ACTIVE' | 'INACTIVE';
-  role: 'ADMIN' | 'USER';
   createdAt: string;
   updatedAt: string;
   userGroups: Array<{

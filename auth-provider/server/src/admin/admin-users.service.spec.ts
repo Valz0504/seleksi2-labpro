@@ -1,3 +1,6 @@
+import { BadRequestException } from '@nestjs/common';
+import { CONTROL_PANEL_ADMIN_GROUP_NAME } from '../auth/control-panel-access.constants';
+import { ControlPanelAccessService } from '../auth/control-panel-access.service';
 import { verifyPassword } from '../common/security/password';
 import { PrismaService } from '../database/prisma.service';
 import { OutboxEventService } from '../event-processing/outbox-event.service';
@@ -17,7 +20,6 @@ describe('AdminUsersService', () => {
     name: 'Managed User',
     email: 'managed@example.com',
     status: 'ACTIVE',
-    role: 'USER',
     createdAt: new Date(),
     updatedAt: new Date(),
     userGroups: [],
@@ -26,12 +28,18 @@ describe('AdminUsersService', () => {
     user: { create: jest.fn(), update: jest.fn() },
     ssoSession: { updateManyAndReturn: jest.fn() },
     accessToken: { updateMany: jest.fn() },
+    mfaLoginChallenge: { updateMany: jest.fn() },
     outboxEvent: { createMany: jest.fn() },
     auditLog: { create: jest.fn() },
   };
   const prisma = {
     user: { findUnique: jest.fn() },
+    userGroup: { findUnique: jest.fn() },
     $transaction: jest.fn(),
+  };
+  const controlPanelAccessService = {
+    canAccess: jest.fn(),
+    assertAnotherActiveAdministratorExists: jest.fn(),
   };
   let service: AdminUsersService;
 
@@ -46,8 +54,13 @@ describe('AdminUsersService', () => {
       },
     ]);
     transaction.accessToken.updateMany.mockResolvedValue({ count: 1 });
+    transaction.mfaLoginChallenge.updateMany.mockResolvedValue({ count: 1 });
     transaction.outboxEvent.createMany.mockResolvedValue({ count: 1 });
     transaction.auditLog.create.mockResolvedValue({});
+    controlPanelAccessService.canAccess.mockResolvedValue(false);
+    controlPanelAccessService.assertAnotherActiveAdministratorExists.mockResolvedValue(
+      undefined,
+    );
     prisma.$transaction.mockImplementation(
       (callback: (value: typeof transaction) => Promise<unknown>) =>
         callback(transaction),
@@ -55,6 +68,7 @@ describe('AdminUsersService', () => {
     service = new AdminUsersService(
       prisma as unknown as PrismaService,
       new AdminRevocationService(new OutboxEventService()),
+      controlPanelAccessService as unknown as ControlPanelAccessService,
     );
   });
 
@@ -187,5 +201,43 @@ describe('AdminUsersService', () => {
     expect(transaction.ssoSession.updateManyAndReturn).toHaveBeenCalled();
     expect(transaction.accessToken.updateMany).toHaveBeenCalled();
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('does not remove the last active Control Panel administrator membership', async () => {
+    prisma.userGroup.findUnique.mockResolvedValue({
+      id: '33333333-3333-4333-8333-333333333333',
+      group: {
+        name: CONTROL_PANEL_ADMIN_GROUP_NAME,
+        policies: [],
+      },
+    });
+    controlPanelAccessService.assertAnotherActiveAdministratorExists.mockRejectedValue(
+      new BadRequestException(),
+    );
+
+    await expect(
+      service.removeGroupMembership(
+        userId,
+        '44444444-4444-4444-8444-444444444444',
+        actor,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not deactivate the last active Control Panel administrator', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: userId,
+      status: 'ACTIVE',
+    });
+    controlPanelAccessService.canAccess.mockResolvedValue(true);
+    controlPanelAccessService.assertAnotherActiveAdministratorExists.mockRejectedValue(
+      new BadRequestException(),
+    );
+
+    await expect(
+      service.updateStatus(userId, { status: 'INACTIVE' }, actor),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

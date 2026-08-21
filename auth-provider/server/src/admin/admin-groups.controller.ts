@@ -39,7 +39,8 @@ import { UpdateGroupDto } from './dto/update-group.dto';
 @ApiCookieAuth('centralSession')
 @ApiUnauthorizedResponse({ description: 'Central session is invalid.' })
 @ApiForbiddenResponse({
-  description: 'The authenticated user is not an administrator.',
+  description:
+    'The authenticated user is not a member of the Control Panel administrator group.',
 })
 export class AdminGroupsController {
   constructor(private readonly groupsService: AdminGroupsService) {}
