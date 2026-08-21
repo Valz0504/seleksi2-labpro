@@ -2,6 +2,8 @@ import { PrismaService } from '../database/prisma.service';
 import type { AdminActor } from './admin-request';
 import { AdminGroupsService } from './admin-groups.service';
 import { AdminRevocationService } from './admin-revocation.service';
+import { CONTROL_PANEL_ADMIN_GROUP_NAME } from '../auth/control-panel-access.constants';
+import { BadRequestException } from '@nestjs/common';
 
 describe('AdminGroupsService', () => {
   const actor: AdminActor = {
@@ -70,5 +72,31 @@ describe('AdminGroupsService', () => {
       ['managed-application'],
       expect.any(Date),
     );
+  });
+
+  it('does not delete the protected Control Panel group', async () => {
+    prisma.group.findUnique.mockResolvedValue({
+      id: groupId,
+      name: CONTROL_PANEL_ADMIN_GROUP_NAME,
+      userGroups: [],
+      policies: [],
+    });
+
+    await expect(service.deleteGroup(groupId, actor)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not rename the protected Control Panel group', async () => {
+    prisma.group.findUnique.mockResolvedValue({
+      id: groupId,
+      name: CONTROL_PANEL_ADMIN_GROUP_NAME,
+    });
+
+    await expect(
+      service.updateGroup(groupId, { name: 'renamed-admins' }, actor),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

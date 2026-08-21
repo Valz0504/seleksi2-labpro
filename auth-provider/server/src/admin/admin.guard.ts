@@ -32,7 +32,7 @@ export class AdminGuard implements CanActivate {
     const currentSession =
       await this.authService.getCurrentSession(sessionToken);
 
-    if (currentSession.user.role !== 'ADMIN') {
+    if (!currentSession.user.canAccessControlPanel) {
       throw new ForbiddenException({
         error: {
           code: 'ADMIN_ACCESS_REQUIRED',

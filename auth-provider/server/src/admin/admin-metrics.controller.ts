@@ -15,7 +15,9 @@ import { AdminGuard } from './admin.guard';
 @ApiTags('Admin metrics')
 @ApiCookieAuth('centralSession')
 @ApiUnauthorizedResponse({ description: 'Central session is invalid.' })
-@ApiForbiddenResponse({ description: 'Administrator role is required.' })
+@ApiForbiddenResponse({
+  description: 'Control Panel administrator group membership is required.',
+})
 export class AdminMetricsController {
   constructor(private readonly collector: AuthMetricsCollectorService) {}
 

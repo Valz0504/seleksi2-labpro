@@ -1,6 +1,8 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CentralSessionService } from '../auth/central-session.service';
+import { CONTROL_PANEL_ADMIN_GROUP_NAME } from '../auth/control-panel-access.constants';
+import { ControlPanelAccessService } from '../auth/control-panel-access.service';
 import {
   AuthenticatedLoginResult,
   RequestContext,
@@ -38,6 +40,7 @@ export class MfaChallengeService {
     private readonly recoveryCodeService: MfaRecoveryCodeService,
     private readonly totpService: TotpService,
     private readonly centralSessionService: CentralSessionService,
+    private readonly controlPanelAccessService: ControlPanelAccessService,
   ) {}
 
   async start(
@@ -96,7 +99,6 @@ export class MfaChallengeService {
             id: true,
             name: true,
             email: true,
-            role: true,
             status: true,
             mfaTotp: {
               select: {
@@ -111,6 +113,9 @@ export class MfaChallengeService {
         },
       },
     });
+    const canAccessControlPanel = challenge
+      ? await this.controlPanelAccessService.canAccess(challenge.userId)
+      : false;
 
     if (
       !challenge ||
@@ -119,7 +124,7 @@ export class MfaChallengeService {
       challenge.attemptCount >= maxAttempts ||
       !allowedIntents.includes(challenge.intent) ||
       challenge.user.status !== 'ACTIVE' ||
-      (challenge.intent === 'ADMIN' && challenge.user.role !== 'ADMIN') ||
+      (challenge.intent === 'ADMIN' && !canAccessControlPanel) ||
       challenge.user.mfaTotp?.enabledAt == null
     ) {
       await this.recordFailure(challenge, now, maxAttempts, context);
@@ -180,11 +185,29 @@ export class MfaChallengeService {
       id: challenge.user.id,
       name: challenge.user.name,
       email: challenge.user.email,
-      role: challenge.user.role,
+      canAccessControlPanel,
     };
 
     try {
       return await this.prisma.$transaction(async (transaction) => {
+        if (challenge.intent === 'ADMIN') {
+          const authorizedUsers = await transaction.user.count({
+            where: {
+              id: challenge.userId,
+              status: 'ACTIVE',
+              userGroups: {
+                some: {
+                  group: { name: CONTROL_PANEL_ADMIN_GROUP_NAME },
+                },
+              },
+            },
+          });
+
+          if (authorizedUsers !== 1) {
+            throw new MfaChallengeRaceError();
+          }
+        }
+
         const claimedChallenge = await transaction.mfaLoginChallenge.updateMany(
           {
             where: {
@@ -194,7 +217,6 @@ export class MfaChallengeService {
               attemptCount: { lt: maxAttempts },
               user: {
                 status: 'ACTIVE',
-                ...(challenge.intent === 'ADMIN' ? { role: 'ADMIN' } : {}),
               },
             },
             data: { usedAt: now },

@@ -3,6 +3,7 @@
 import type { FormEvent } from 'react';
 import { useActionState } from 'react';
 import type { AdminGroup, AdminUser } from '@/lib/admin-session';
+import { CONTROL_PANEL_ADMIN_GROUP_NAME } from '@/lib/control-panel-access';
 import {
   addUserGroupAction,
   removeUserGroupAction,
@@ -28,11 +29,12 @@ function RemoveMembershipForm({ userId, groupId, groupName }: RemoveMembershipFo
   const [state, formAction, isPending] = useActionState(actionWithTarget, INITIAL_STATE);
 
   function confirmRemoval(event: FormEvent<HTMLFormElement>) {
-    if (
-      !window.confirm(
-        `Hapus user dari group ${groupName}? Jika ini jalur ALLOW terakhir, central session dan access token aktif user akan dicabut.`,
-      )
-    ) {
+    const impact =
+      groupName === CONTROL_PANEL_ADMIN_GROUP_NAME
+        ? 'User akan kehilangan akses Control Panel. Administrator aktif terakhir tidak dapat dikeluarkan.'
+        : 'Jika ini jalur ALLOW terakhir, central session dan access token aktif user akan dicabut.';
+
+    if (!window.confirm(`Hapus user dari group ${groupName}? ${impact}`)) {
       event.preventDefault();
     }
   }
@@ -78,6 +80,12 @@ export function UserMembershipManager({ userId, memberships, groups }: UserMembe
                   <p className="mt-1 min-h-6 text-sm leading-6 text-slate-500">
                     {group.description ?? 'Tanpa deskripsi.'}
                   </p>
+
+                  {group.name === CONTROL_PANEL_ADMIN_GROUP_NAME ? (
+                    <p className="mt-3 rounded-md bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">
+                      Memberikan akses ke Control Panel
+                    </p>
+                  ) : null}
 
                   <div className="mt-4">
                     <p className="text-xs font-bold tracking-wide text-slate-500 uppercase">

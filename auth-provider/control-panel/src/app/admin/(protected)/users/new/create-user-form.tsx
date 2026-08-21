@@ -99,7 +99,7 @@ export function CreateUserForm() {
       </div>
 
       <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">
-        User baru otomatis berstatus aktif dengan role User. Akses App A/B diberikan melalui group
+        User baru otomatis berstatus aktif. Akses Control Panel dan App A/B diberikan melalui group
         pada bagian keanggotaan group.
       </div>
 

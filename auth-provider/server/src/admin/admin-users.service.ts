@@ -4,6 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { CONTROL_PANEL_ADMIN_GROUP_NAME } from '../auth/control-panel-access.constants';
+import { ControlPanelAccessService } from '../auth/control-panel-access.service';
 import { hashPassword } from '../common/security/password';
 import { PrismaService } from '../database/prisma.service';
 import type { AdminActor } from './admin-request';
@@ -18,7 +20,6 @@ const USER_SELECT = {
   name: true,
   email: true,
   status: true,
-  role: true,
   createdAt: true,
   updatedAt: true,
   userGroups: {
@@ -42,6 +43,7 @@ export class AdminUsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly revocationService: AdminRevocationService,
+    private readonly controlPanelAccessService: ControlPanelAccessService,
   ) {}
 
   listUsers() {
@@ -167,6 +169,15 @@ export class AdminUsersService {
     }
     if (currentUser.status === input.status) {
       return this.getUser(userId);
+    }
+
+    if (
+      input.status === 'INACTIVE' &&
+      (await this.controlPanelAccessService.canAccess(userId))
+    ) {
+      await this.controlPanelAccessService.assertAnotherActiveAdministratorExists(
+        userId,
+      );
     }
 
     const now = new Date();
@@ -342,6 +353,12 @@ export class AdminUsersService {
     const applicationIds = membership.group.policies.map(
       ({ applicationId }) => applicationId,
     );
+
+    if (membership.group.name === CONTROL_PANEL_ADMIN_GROUP_NAME) {
+      await this.controlPanelAccessService.assertAnotherActiveAdministratorExists(
+        userId,
+      );
+    }
 
     await this.prisma.$transaction(async (transaction) => {
       await transaction.userGroup.delete({ where: { id: membership.id } });

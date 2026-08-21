@@ -12,6 +12,7 @@ import { MfaSecretCryptoService } from '../mfa/mfa-secret-crypto.service';
 import { MfaRecoveryCodeService } from '../mfa/mfa-recovery-code.service';
 import { MfaManagementService } from '../mfa/mfa-management.service';
 import { TotpService } from '../mfa/totp.service';
+import { ControlPanelAccessService } from './control-panel-access.service';
 
 @Module({
   controllers: [AuthController, MfaController],
@@ -27,7 +28,13 @@ import { TotpService } from '../mfa/totp.service';
     MfaManagementService,
     MfaSecretCryptoService,
     TotpService,
+    ControlPanelAccessService,
   ],
-  exports: [AuthService, FrontChannelLoginService, SessionCookieService],
+  exports: [
+    AuthService,
+    ControlPanelAccessService,
+    FrontChannelLoginService,
+    SessionCookieService,
+  ],
 })
 export class AuthModule {}

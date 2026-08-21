@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { CONTROL_PANEL_ADMIN_GROUP_NAME } from '../src/auth/control-panel-access.constants';
 import { hashPassword } from '../src/common/security/password';
 import { hashSecret } from '../src/common/security/secret';
 import { PrismaClient } from '../src/generated/prisma/client';
@@ -62,7 +63,6 @@ async function main() {
         email,
         passwordHash: await hashPassword(adminPassword),
         status: 'ACTIVE',
-        role: 'ADMIN',
       },
     });
     adminId = admin.id;
@@ -70,7 +70,6 @@ async function main() {
     const admin = await prisma.user.update({
       where: { email },
       data: {
-        role: 'ADMIN',
         ...(!existingAdmin.passwordHash.startsWith('$argon2id$')
           ? { passwordHash: await hashPassword(adminPassword) }
           : {}),
@@ -78,6 +77,29 @@ async function main() {
     });
     adminId = admin.id;
   }
+
+  const controlPanelAdminGroup = await prisma.group.upsert({
+    where: { name: CONTROL_PANEL_ADMIN_GROUP_NAME },
+    update: {},
+    create: {
+      name: CONTROL_PANEL_ADMIN_GROUP_NAME,
+      description: 'Users allowed to access the Auth Provider Control Panel',
+    },
+  });
+
+  await prisma.userGroup.upsert({
+    where: {
+      userId_groupId: {
+        userId: adminId,
+        groupId: controlPanelAdminGroup.id,
+      },
+    },
+    update: {},
+    create: {
+      userId: adminId,
+      groupId: controlPanelAdminGroup.id,
+    },
+  });
 
   for (const relyingApplication of relyingApplications) {
     const group = await prisma.group.upsert({

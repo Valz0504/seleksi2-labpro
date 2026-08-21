@@ -6,6 +6,7 @@ import {
   getCurrentAdminSession,
   type AdminUser,
 } from '@/lib/admin-session';
+import { CONTROL_PANEL_ADMIN_GROUP_NAME } from '@/lib/control-panel-access';
 import { UpdatePasswordForm } from './update-password-form';
 import { UpdateUserForm } from './update-user-form';
 import { UserMembershipManager } from './user-membership-manager';
@@ -82,6 +83,9 @@ export default async function AdminUserDetailPage({
   const passwordResult = readSingle(query.password);
   const membershipResult = readSingle(query.membership);
   const isCurrentUser = currentSession?.user.id === user.id;
+  const canAccessControlPanel = user.userGroups.some(
+    ({ group }) => group.name === CONTROL_PANEL_ADMIN_GROUP_NAME,
+  );
 
   return (
     <>
@@ -172,9 +176,11 @@ export default async function AdminUserDetailPage({
             <h3 className="font-bold text-slate-950">Informasi akun</h3>
             <dl className="mt-4 space-y-4 text-sm">
               <div>
-                <dt className="font-semibold text-slate-500">Role</dt>
+                <dt className="font-semibold text-slate-500">Akses Control Panel</dt>
                 <dd className="mt-1 font-bold text-slate-900">
-                  {user.role === 'ADMIN' ? 'Admin' : 'User'}
+                  {canAccessControlPanel
+                    ? `Diizinkan melalui ${CONTROL_PANEL_ADMIN_GROUP_NAME}`
+                    : 'Tidak diizinkan'}
                 </dd>
               </div>
               <div>
