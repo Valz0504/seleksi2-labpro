@@ -56,7 +56,7 @@ export class AuthController {
           id: '11111111-1111-4111-8111-111111111111',
           name: 'Example User',
           email: 'user@example.com',
-          role: 'USER',
+          canAccessControlPanel: false,
         },
         session: {
           id: '22222222-2222-4222-8222-222222222222',
@@ -197,7 +197,7 @@ export class AuthController {
           ipAddress: request.ip?.slice(0, 45),
           userAgent: request.get('user-agent'),
         },
-        { requiredRole: 'ADMIN', intent: { type: 'ADMIN' } },
+        { requireControlPanelAccess: true, intent: { type: 'ADMIN' } },
       );
 
       if (result.status === 'mfa_required') {

@@ -5,6 +5,7 @@ import { PrismaService } from '../database/prisma.service';
 import { OutboxEventService } from '../event-processing/outbox-event.service';
 import { MfaChallengeService } from '../mfa/mfa-challenge.service';
 import { CentralSessionService } from './central-session.service';
+import { ControlPanelAccessService } from './control-panel-access.service';
 import type {
   CurrentSession,
   LoginRequirements,
@@ -25,6 +26,7 @@ export class AuthService {
     private readonly outboxEventService: OutboxEventService,
     private readonly mfaChallengeService: MfaChallengeService,
     private readonly centralSessionService: CentralSessionService,
+    private readonly controlPanelAccessService: ControlPanelAccessService,
   ) {}
 
   async login(
@@ -42,7 +44,6 @@ export class AuthService {
         email: true,
         passwordHash: true,
         status: true,
-        role: true,
         mfaTotp: { select: { enabledAt: true } },
       },
     });
@@ -51,12 +52,16 @@ export class AuthService {
       password,
     );
 
+    const credentialsAreValid =
+      user !== null && passwordMatches && user.status === 'ACTIVE';
+    const canAccessControlPanel = credentialsAreValid
+      ? await this.controlPanelAccessService.canAccess(user.id)
+      : false;
+
     if (
       !user ||
-      !passwordMatches ||
-      user.status !== 'ACTIVE' ||
-      (requirements.requiredRole !== undefined &&
-        user.role !== requirements.requiredRole)
+      !credentialsAreValid ||
+      (requirements.requireControlPanelAccess && !canAccessControlPanel)
     ) {
       await this.prisma.auditLog.create({
         data: {
@@ -75,7 +80,7 @@ export class AuthService {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role,
+      canAccessControlPanel,
     };
 
     if (user.mfaTotp?.enabledAt != null) {
@@ -134,7 +139,6 @@ export class AuthService {
             id: true,
             name: true,
             email: true,
-            role: true,
             status: true,
           },
         },
@@ -181,12 +185,15 @@ export class AuthService {
       throw this.invalidSessionException();
     }
 
+    const canAccessControlPanel =
+      await this.controlPanelAccessService.canAccess(session.user.id);
+
     return {
       user: {
         id: session.user.id,
         name: session.user.name,
         email: session.user.email,
-        role: session.user.role,
+        canAccessControlPanel,
       },
       session: {
         id: session.id,

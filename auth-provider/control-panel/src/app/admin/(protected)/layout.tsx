@@ -23,7 +23,7 @@ export default async function ProtectedAdminLayout({ children }: ProtectedAdminL
     redirect('/admin/login?error=session_required');
   }
 
-  if (currentSession.user.role !== 'ADMIN') {
+  if (!currentSession.user.canAccessControlPanel) {
     redirect('/admin/login?error=admin_required');
   }
 

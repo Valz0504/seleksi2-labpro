@@ -111,15 +111,13 @@ describe('AppController (e2e)', () => {
     email: 'admin@example.com',
     passwordHash: '',
     status: 'ACTIVE' as const,
-    role: 'ADMIN' as const,
   };
-  let currentRole: 'ADMIN' | 'USER' = 'ADMIN';
+  let hasControlPanelAccess = true;
   const adminUserListRecord = () => ({
     id: activeUser.id,
     name: activeUser.name,
     email: activeUser.email,
     status: activeUser.status,
-    role: currentRole,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     userGroups: [],
@@ -128,6 +126,7 @@ describe('AppController (e2e)', () => {
     $queryRaw: jest.fn(),
     $disconnect: jest.fn(),
     user: {
+      count: jest.fn(),
       findUnique: jest.fn(),
       findMany: jest.fn(),
     },
@@ -271,13 +270,21 @@ describe('AppController (e2e)', () => {
     prisma.$queryRaw.mockResolvedValue([{ result: 1 }]);
     rabbitMqPublisher.checkReadiness.mockResolvedValue(undefined);
     activeUser.passwordHash = await hashPassword('correct-password');
+    prisma.user.count.mockImplementation(
+      ({ where }: { where: { id?: string | { not?: string } } }) => {
+        if (typeof where.id === 'object' && where.id.not) {
+          return Promise.resolve(1);
+        }
+
+        return Promise.resolve(hasControlPanelAccess ? 1 : 0);
+      },
+    );
     prisma.user.findUnique.mockImplementation(
       ({ where }: { where: { email?: string; id?: string } }) =>
         Promise.resolve(
           where.email === activeUser.email || where.id === activeUser.id
             ? {
                 ...activeUser,
-                role: currentRole,
                 mfaTotp: currentMfaRecord
                   ? { enabledAt: currentMfaRecord.enabledAt }
                   : null,
@@ -319,7 +326,7 @@ describe('AppController (e2e)', () => {
           persistedSession?.sessionTokenHash === where.sessionTokenHash
             ? {
                 ...persistedSession,
-                user: { ...activeUser, role: currentRole },
+                user: { ...activeUser },
               }
             : null,
         ),
@@ -522,7 +529,6 @@ describe('AppController (e2e)', () => {
                 ...persistedMfaChallenge,
                 user: {
                   ...activeUser,
-                  role: currentRole,
                   mfaTotp: currentMfaRecord,
                 },
               }
@@ -1344,6 +1350,45 @@ describe('AppController (e2e)', () => {
     }
   });
 
+  it('rejects an admin MFA challenge when group access is removed before completion', async () => {
+    const secret = enableCurrentUserMfa();
+    persistedSession = undefined;
+    persistedMfaChallenge = undefined;
+    const adminAgent = request.agent(app.getHttpServer());
+
+    try {
+      await adminAgent
+        .post('/auth/login/admin')
+        .type('form')
+        .send({
+          email: activeUser.email,
+          password: 'correct-password',
+        })
+        .expect(303)
+        .expect('Location', 'http://localhost:3000/login/mfa');
+
+      hasControlPanelAccess = false;
+      const response = await adminAgent
+        .post('/auth/login/mfa/continue')
+        .type('form')
+        .send({ code: app.get(TotpService).generateToken(secret) })
+        .expect(303);
+      const redirectUrl = new URL(response.headers['location']);
+
+      expect(redirectUrl.origin + redirectUrl.pathname).toBe(
+        'http://localhost:3000/login/mfa',
+      );
+      expect(redirectUrl.searchParams.get('error')).toBe(
+        'invalid_or_expired_code',
+      );
+      expect(persistedSession).toBeUndefined();
+    } finally {
+      hasControlPanelAccess = true;
+      currentMfaRecord = undefined;
+      persistedMfaChallenge = undefined;
+    }
+  });
+
   it('does not redirect an authorization request to an unregistered URI', () => {
     return request(app.getHttpServer())
       .get('/authorize')
@@ -1481,8 +1526,8 @@ describe('AppController (e2e)', () => {
     expect(callbackUrl.searchParams.get('state')).toBe(validState);
   });
 
-  it('rejects a non-admin account from the browser admin login', async () => {
-    currentRole = 'USER';
+  it('rejects a user outside the Control Panel group from admin login', async () => {
+    hasControlPanelAccess = false;
 
     try {
       const response = await request(app.getHttpServer())
@@ -1503,7 +1548,7 @@ describe('AppController (e2e)', () => {
       );
       expect(response.headers['set-cookie']).toBeUndefined();
     } finally {
-      currentRole = 'ADMIN';
+      hasControlPanelAccess = true;
     }
   });
 
@@ -1547,7 +1592,7 @@ describe('AppController (e2e)', () => {
   });
 
   it('lets a regular user perform SSO logout only from the public Auth Provider UI', async () => {
-    currentRole = 'USER';
+    hasControlPanelAccess = false;
     const userAgent = request.agent(app.getHttpServer());
 
     try {
@@ -1587,7 +1632,7 @@ describe('AppController (e2e)', () => {
       expect(persistedSession?.status).toBe('REVOKED');
       await userAgent.get('/auth/session').expect(401);
     } finally {
-      currentRole = 'ADMIN';
+      hasControlPanelAccess = true;
     }
   });
 
@@ -1614,9 +1659,9 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer()).get('/admin/metrics').expect(401);
   });
 
-  it('rejects an authenticated non-admin user from admin APIs', async () => {
+  it('rejects an authenticated non-member from admin APIs', async () => {
     const regularAgent = request.agent(app.getHttpServer());
-    currentRole = 'USER';
+    hasControlPanelAccess = false;
 
     try {
       await regularAgent
@@ -1633,7 +1678,7 @@ describe('AppController (e2e)', () => {
           },
         });
     } finally {
-      currentRole = 'ADMIN';
+      hasControlPanelAccess = true;
     }
   });
 
@@ -1651,7 +1696,7 @@ describe('AppController (e2e)', () => {
       user: {
         id: activeUser.id,
         email: activeUser.email,
-        role: 'ADMIN',
+        canAccessControlPanel: true,
       },
       session: {
         id: '22222222-2222-4222-8222-222222222222',

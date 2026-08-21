@@ -7,6 +7,7 @@ import { OutboxEventService } from '../event-processing/outbox-event.service';
 import { MfaChallengeService } from '../mfa/mfa-challenge.service';
 import { AuthService } from './auth.service';
 import { CentralSessionService } from './central-session.service';
+import { ControlPanelAccessService } from './control-panel-access.service';
 
 describe('AuthService', () => {
   const prisma = {
@@ -42,6 +43,9 @@ describe('AuthService', () => {
     start: jest.fn(),
     complete: jest.fn(),
   };
+  const controlPanelAccessService = {
+    canAccess: jest.fn(),
+  };
   let authService: AuthService;
 
   beforeEach(async () => {
@@ -50,6 +54,7 @@ describe('AuthService', () => {
     prisma.accessToken.updateMany.mockResolvedValue({ count: 1 });
     prisma.auditLog.create.mockResolvedValue({});
     prisma.outboxEvent.createMany.mockResolvedValue({ count: 1 });
+    controlPanelAccessService.canAccess.mockResolvedValue(false);
     prisma.$transaction.mockImplementation(
       (callback: (transaction: typeof prisma) => Promise<unknown>) =>
         callback(prisma),
@@ -63,6 +68,10 @@ describe('AuthService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: configService },
         { provide: MfaChallengeService, useValue: mfaChallengeService },
+        {
+          provide: ControlPanelAccessService,
+          useValue: controlPanelAccessService,
+        },
       ],
     }).compile();
 
@@ -79,7 +88,6 @@ describe('AuthService', () => {
       email: 'active@example.com',
       passwordHash,
       status: 'ACTIVE',
-      role: 'USER',
     });
     prisma.ssoSession.create.mockImplementation(
       ({ data }: { data: { expiresAt: Date } }) =>
@@ -136,7 +144,6 @@ describe('AuthService', () => {
       email: 'mfa@example.com',
       passwordHash,
       status: 'ACTIVE',
-      role: 'USER',
       mfaTotp: { enabledAt: new Date() },
     });
     mfaChallengeService.start.mockResolvedValue({
@@ -201,7 +208,7 @@ describe('AuthService', () => {
     );
   });
 
-  it('does not create an admin session for a valid non-admin account', async () => {
+  it('does not create an admin session without Control Panel group access', async () => {
     const passwordHash = await hashPassword('correct-password');
 
     prisma.user.findUnique.mockResolvedValue({
@@ -210,7 +217,6 @@ describe('AuthService', () => {
       email: 'user@example.com',
       passwordHash,
       status: 'ACTIVE',
-      role: 'USER',
     });
 
     await expect(
@@ -219,7 +225,7 @@ describe('AuthService', () => {
         'correct-password',
         {},
         {
-          requiredRole: 'ADMIN',
+          requireControlPanelAccess: true,
         },
       ),
     ).rejects.toBeInstanceOf(UnauthorizedException);
@@ -247,7 +253,6 @@ describe('AuthService', () => {
         id: '11111111-1111-4111-8111-111111111111',
         name: 'Active User',
         email: 'active@example.com',
-        role: 'USER',
         status: 'ACTIVE',
       },
     });

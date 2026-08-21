@@ -70,7 +70,7 @@ export default async function Home({ searchParams }: HomeProps) {
                 </Link>
               </div>
 
-              {sessionLookup.session.user.role === 'ADMIN' ? (
+              {sessionLookup.session.user.canAccessControlPanel ? (
                 <Link
                   className="text-sm font-semibold text-blue-700 hover:text-blue-800 hover:underline"
                   href="/admin"

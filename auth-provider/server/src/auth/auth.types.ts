@@ -4,7 +4,7 @@ export interface RequestContext {
 }
 
 export interface LoginRequirements {
-  requiredRole?: SessionUser['role'];
+  requireControlPanelAccess?: boolean;
   intent?: LoginIntent;
 }
 
@@ -15,7 +15,7 @@ export interface SessionUser {
   id: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'USER';
+  canAccessControlPanel: boolean;
 }
 
 export interface SessionDetails {
