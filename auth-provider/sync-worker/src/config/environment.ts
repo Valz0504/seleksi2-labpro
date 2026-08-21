@@ -87,6 +87,8 @@ function parseOptionalHostname(value: unknown): string | undefined {
   return value.toLowerCase();
 }
 
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
+
 export function validateEnvironment(
   environment: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -145,6 +147,11 @@ export function validateEnvironment(
     ),
     DELIVERY_RETRY_BASE_MS: retryBaseMs,
     DELIVERY_RETRY_MAX_MS: retryMaxMs,
+    SHUTDOWN_TIMEOUT_MS: parsePositiveInteger(
+      environment['SHUTDOWN_TIMEOUT_MS'],
+      'SHUTDOWN_TIMEOUT_MS',
+      DEFAULT_SHUTDOWN_TIMEOUT_MS,
+    ),
     SYNC_WORKER_LOGOUT_HOST_OVERRIDE: parseOptionalHostname(
       environment['SYNC_WORKER_LOGOUT_HOST_OVERRIDE'],
     ),

@@ -1,12 +1,8 @@
-import {
-  Injectable,
-  Logger,
-  OnApplicationBootstrap,
-  OnModuleDestroy,
-} from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { RevocationEvent } from '@seleksi/shared';
 import { PrismaService } from '../database/prisma.service';
+import { AuthMetricsService } from '../metrics/auth-metrics.service';
 import {
   RabbitMqPublishError,
   RabbitMqPublisherService,
@@ -14,9 +10,7 @@ import {
 } from './rabbitmq-publisher.service';
 
 @Injectable()
-export class OutboxPublisherService
-  implements OnApplicationBootstrap, OnModuleDestroy
-{
+export class OutboxPublisherService implements OnApplicationBootstrap {
   private readonly logger = new Logger(OutboxPublisherService.name);
   private readonly enabled: boolean;
   private readonly intervalMs: number;
@@ -30,6 +24,7 @@ export class OutboxPublisherService
   constructor(
     private readonly prisma: PrismaService,
     private readonly rabbitMqPublisher: RabbitMqPublisherService,
+    private readonly metrics: AuthMetricsService,
     configService: ConfigService,
   ) {
     this.enabled = configService.getOrThrow<boolean>(
@@ -63,12 +58,14 @@ export class OutboxPublisherService
     this.triggerCycle();
   }
 
-  async onModuleDestroy(): Promise<void> {
+  stopPolling(): void {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;
     }
+  }
 
+  async waitForIdle(): Promise<void> {
     await this.activeCycle?.catch(() => undefined);
   }
 
@@ -120,6 +117,9 @@ export class OutboxPublisherService
         continue;
       }
 
+      const publishStartedAt = process.hrtime.bigint();
+      let publishOutcome: 'failure' | 'success' = 'failure';
+
       try {
         const event = candidate.payload as unknown as RevocationEvent;
 
@@ -148,6 +148,7 @@ export class OutboxPublisherService
         });
 
         publishedCount += published.count;
+        publishOutcome = 'success';
       } catch (error) {
         const failedAt = new Date();
         const retryAt = new Date(
@@ -173,6 +174,11 @@ export class OutboxPublisherService
         if (error instanceof RabbitMqPublishError) {
           break;
         }
+      } finally {
+        this.metrics.recordOutboxPublish(
+          publishOutcome,
+          Number(process.hrtime.bigint() - publishStartedAt) / 1_000_000_000,
+        );
       }
     }
 

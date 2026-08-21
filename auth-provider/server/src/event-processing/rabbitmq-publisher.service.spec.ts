@@ -35,6 +35,7 @@ describe('RabbitMqPublisherService', () => {
     assertExchange: jest.Mock;
     assertQueue: jest.Mock;
     bindQueue: jest.Mock;
+    checkQueue: jest.Mock;
     publish: jest.Mock;
     close: jest.Mock;
   };
@@ -57,6 +58,11 @@ describe('RabbitMqPublisherService', () => {
       assertExchange: jest.fn().mockResolvedValue({}),
       assertQueue: jest.fn().mockResolvedValue({}),
       bindQueue: jest.fn().mockResolvedValue({}),
+      checkQueue: jest.fn().mockResolvedValue({
+        queue: REVOCATION_MESSAGING.queue,
+        messageCount: 0,
+        consumerCount: 0,
+      }),
       publish: jest.fn().mockImplementation((...arguments_: unknown[]) => {
         const callback = arguments_[4] as (error?: unknown) => void;
 
@@ -74,7 +80,7 @@ describe('RabbitMqPublisherService', () => {
   });
 
   afterEach(async () => {
-    await service.onModuleDestroy();
+    await service.close();
   });
 
   it('asserts durable topology and resolves only on publisher confirm', async () => {
@@ -129,6 +135,48 @@ describe('RabbitMqPublisherService', () => {
     await expect(service.publish(event)).rejects.toThrow('broker nack');
     expect(channel.close).toHaveBeenCalled();
     expect(connection.close).toHaveBeenCalled();
+  });
+
+  it('checks the durable queue through the reusable publisher channel', async () => {
+    await expect(service.checkReadiness()).resolves.toBeUndefined();
+
+    expect(channel.checkQueue).toHaveBeenCalledWith(REVOCATION_MESSAGING.queue);
+    expect(amqp.connect).toHaveBeenCalledTimes(1);
+
+    await expect(service.checkReadiness()).resolves.toBeUndefined();
+    expect(amqp.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads actual main and dead-letter queue state from RabbitMQ', async () => {
+    channel.checkQueue
+      .mockResolvedValueOnce({ messageCount: 4, consumerCount: 1 })
+      .mockResolvedValueOnce({ messageCount: 2, consumerCount: 0 });
+
+    await expect(service.getQueueMetrics()).resolves.toEqual({
+      main: { messagesReady: 4, consumers: 1 },
+      deadLetter: { messagesReady: 2 },
+    });
+    expect(channel.checkQueue).toHaveBeenNthCalledWith(
+      1,
+      REVOCATION_MESSAGING.queue,
+    );
+    expect(channel.checkQueue).toHaveBeenNthCalledWith(
+      2,
+      REVOCATION_MESSAGING.deadLetterQueue,
+    );
+  });
+
+  it('resets a failed readiness channel so the next probe can reconnect', async () => {
+    channel.checkQueue.mockRejectedValueOnce(new Error('broker unavailable'));
+
+    await expect(service.checkReadiness()).rejects.toThrow(
+      'broker unavailable',
+    );
+    expect(channel.close).toHaveBeenCalled();
+    expect(connection.close).toHaveBeenCalled();
+
+    await expect(service.checkReadiness()).resolves.toBeUndefined();
+    expect(amqp.connect).toHaveBeenCalledTimes(2);
   });
 
   it('rejects a mandatory message returned as unroutable', async () => {

@@ -29,12 +29,12 @@ describe('AdminGuard', () => {
     );
   });
 
-  it('allows an active ADMIN session and attaches a safe actor context', async () => {
+  it('allows a Control Panel group member and attaches a safe actor context', async () => {
     sessionCookieService.read.mockReturnValue('raw-session-token');
     authService.getCurrentSession.mockResolvedValue({
       user: {
         id: '11111111-1111-4111-8111-111111111111',
-        role: 'ADMIN',
+        canAccessControlPanel: true,
       },
       session: { id: '22222222-2222-4222-8222-222222222222' },
     });
@@ -56,10 +56,13 @@ describe('AdminGuard', () => {
     expect(authService.getCurrentSession).not.toHaveBeenCalled();
   });
 
-  it('rejects an authenticated non-admin user', async () => {
+  it('rejects an authenticated user without Control Panel access', async () => {
     sessionCookieService.read.mockReturnValue('raw-session-token');
     authService.getCurrentSession.mockResolvedValue({
-      user: { id: '11111111-1111-4111-8111-111111111111', role: 'USER' },
+      user: {
+        id: '11111111-1111-4111-8111-111111111111',
+        canAccessControlPanel: false,
+      },
       session: { id: '22222222-2222-4222-8222-222222222222' },
     });
 

@@ -164,6 +164,13 @@ export class AdminRevocationService {
         revokedAt: now,
       },
     });
+    await transaction.mfaLoginChallenge.updateMany({
+      where: {
+        userId: { in: uniqueUserIds },
+        usedAt: null,
+      },
+      data: { usedAt: now },
+    });
 
     return revokedSessions;
   }

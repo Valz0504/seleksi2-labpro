@@ -4,6 +4,7 @@ describe('validateEnvironment', () => {
   const validEnvironment = {
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/auth_provider',
     SSO_COOKIE_SECRET: 'a-secure-cookie-secret-with-at-least-32-characters',
+    MFA_ENCRYPTION_KEY: '0123456789abcdef'.repeat(4),
     AUTH_LOGIN_URL: 'http://localhost:3000/login',
     CONTROL_PANEL_ADMIN_LOGIN_URL: 'http://localhost:3000/admin/login',
     CONTROL_PANEL_ADMIN_DASHBOARD_URL: 'http://localhost:3000/admin',
@@ -13,6 +14,9 @@ describe('validateEnvironment', () => {
   it('applies safe development defaults for session and OAuth lifetimes', () => {
     expect(validateEnvironment(validEnvironment)).toMatchObject({
       SSO_COOKIE_NAME: 'sso_session',
+      MFA_CHALLENGE_COOKIE_NAME: 'mfa_challenge',
+      MFA_CHALLENGE_TTL_SECONDS: 300,
+      MFA_CHALLENGE_MAX_ATTEMPTS: 5,
       SSO_COOKIE_SECURE: false,
       SSO_SESSION_TTL_SECONDS: 28_800,
       AUTHORIZATION_CODE_TTL_SECONDS: 300,
@@ -26,6 +30,7 @@ describe('validateEnvironment', () => {
       OUTBOX_PUBLISH_LEASE_MS: 30_000,
       OUTBOX_PUBLISH_RETRY_BASE_MS: 1_000,
       OUTBOX_PUBLISH_RETRY_MAX_MS: 60_000,
+      SHUTDOWN_TIMEOUT_MS: 10_000,
       SWAGGER_ENABLED: true,
     });
   });
@@ -37,6 +42,26 @@ describe('validateEnvironment', () => {
         SSO_COOKIE_SECRET: 'too-short',
       }),
     ).toThrow('SSO_COOKIE_SECRET must contain at least 32 characters');
+  });
+
+  it('requires a 32-byte hexadecimal MFA encryption key', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        MFA_ENCRYPTION_KEY: 'not-a-32-byte-hex-key',
+      }),
+    ).toThrow(
+      'MFA_ENCRYPTION_KEY must contain exactly 64 hexadecimal characters',
+    );
+  });
+
+  it('keeps the pending MFA cookie separate from the central-session cookie', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        MFA_CHALLENGE_COOKIE_NAME: 'sso_session',
+      }),
+    ).toThrow('MFA_CHALLENGE_COOKIE_NAME must differ from SSO_COOKIE_NAME');
   });
 
   it('rejects invalid TTL and boolean values', () => {
@@ -116,5 +141,14 @@ describe('validateEnvironment', () => {
         OUTBOX_PUBLISH_BATCH_SIZE: '0',
       }),
     ).toThrow('OUTBOX_PUBLISH_BATCH_SIZE must be a positive integer');
+  });
+
+  it('rejects an invalid graceful shutdown timeout', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validEnvironment,
+        SHUTDOWN_TIMEOUT_MS: '0',
+      }),
+    ).toThrow('SHUTDOWN_TIMEOUT_MS must be a positive integer');
   });
 });

@@ -62,9 +62,15 @@ export default async function Home({ searchParams }: HomeProps) {
                   Halo, {sessionLookup.session.user.name}
                 </h2>
                 <p className="mt-1 text-slate-600">{sessionLookup.session.user.email}</p>
+                <Link
+                  className="mt-3 inline-block text-sm font-semibold text-blue-700 hover:text-blue-800 hover:underline"
+                  href="/security/mfa"
+                >
+                  Atur keamanan MFA
+                </Link>
               </div>
 
-              {sessionLookup.session.user.role === 'ADMIN' ? (
+              {sessionLookup.session.user.canAccessControlPanel ? (
                 <Link
                   className="text-sm font-semibold text-blue-700 hover:text-blue-800 hover:underline"
                   href="/admin"

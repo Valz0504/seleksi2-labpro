@@ -59,6 +59,10 @@ describe('RevocationDeliveryService', () => {
   const deadLetterPublisher = {
     publish: jest.fn(),
   };
+  const metrics = {
+    recordDelivery: jest.fn(),
+    recordTerminalFailure: jest.fn(),
+  };
   const configService = {
     getOrThrow: jest.fn((name: string) => {
       if (name === 'DELIVERY_RETRY_MAX_ATTEMPTS') {
@@ -96,6 +100,7 @@ describe('RevocationDeliveryService', () => {
       prisma as never,
       internalLogoutClient as never,
       deadLetterPublisher as never,
+      metrics as never,
       configService as never,
     );
   });
@@ -115,6 +120,11 @@ describe('RevocationDeliveryService', () => {
       skipDuplicates: true,
     });
     expect(internalLogoutClient.deliver).toHaveBeenCalledTimes(2);
+    expect(metrics.recordDelivery).toHaveBeenCalledTimes(2);
+    expect(metrics.recordDelivery).toHaveBeenCalledWith(
+      'success',
+      expect.any(Number),
+    );
 
     const statusUpdates = prisma.eventDelivery.updateMany.mock.calls.map(
       ([input]: [{ data: { status: EventDeliveryStatus } }]) =>
@@ -176,6 +186,10 @@ describe('RevocationDeliveryService', () => {
     );
     expect(persistedStatuses).toContain(EventDeliveryStatus.RETRYING);
     expect(persistedStatuses).toContain(EventDeliveryStatus.SUCCEEDED);
+    expect(metrics.recordDelivery).toHaveBeenCalledWith(
+      'retry',
+      expect.any(Number),
+    );
   });
 
   it('schedules the first retry using exponential backoff', async () => {
@@ -347,6 +361,7 @@ describe('RevocationDeliveryService', () => {
       },
     });
     expect(internalLogoutClient.deliver).not.toHaveBeenCalled();
+    expect(metrics.recordTerminalFailure).toHaveBeenCalledTimes(1);
   });
 
   it('keeps an exhausted delivery retryable when DLQ publish fails', async () => {

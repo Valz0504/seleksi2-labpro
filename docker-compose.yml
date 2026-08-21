@@ -89,6 +89,7 @@ services:
       dockerfile: auth-provider/server/Dockerfile
     ports:
       - '${AUTH_SERVER_PORT}:3001'
+    stop_grace_period: 15s
     environment:
       PORT: 3001
       DATABASE_URL: postgresql://${PRIMARY_DB_USER}:${PRIMARY_DB_PASSWORD}@primary-db:5432/${PRIMARY_DB_NAME}
@@ -97,6 +98,10 @@ services:
       CONTROL_PANEL_ADMIN_DASHBOARD_URL: ${CONTROL_PANEL_ADMIN_DASHBOARD_URL}
       SSO_COOKIE_SECRET: ${SSO_COOKIE_SECRET}
       SSO_COOKIE_NAME: ${SSO_COOKIE_NAME}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY}
+      MFA_CHALLENGE_COOKIE_NAME: ${MFA_CHALLENGE_COOKIE_NAME:-mfa_challenge}
+      MFA_CHALLENGE_TTL_SECONDS: ${MFA_CHALLENGE_TTL_SECONDS:-300}
+      MFA_CHALLENGE_MAX_ATTEMPTS: ${MFA_CHALLENGE_MAX_ATTEMPTS:-5}
       SSO_COOKIE_SECURE: ${SSO_COOKIE_SECURE}
       SSO_SESSION_TTL_SECONDS: ${SSO_SESSION_TTL_SECONDS}
       AUTHORIZATION_CODE_TTL_SECONDS: ${AUTHORIZATION_CODE_TTL_SECONDS}
@@ -112,6 +117,7 @@ services:
       OUTBOX_PUBLISH_LEASE_MS: ${OUTBOX_PUBLISH_LEASE_MS:-30000}
       OUTBOX_PUBLISH_RETRY_BASE_MS: ${OUTBOX_PUBLISH_RETRY_BASE_MS:-1000}
       OUTBOX_PUBLISH_RETRY_MAX_MS: ${OUTBOX_PUBLISH_RETRY_MAX_MS:-60000}
+      SHUTDOWN_TIMEOUT_MS: ${SHUTDOWN_TIMEOUT_MS:-10000}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-true}
     depends_on:
       rabbitmq:
@@ -119,7 +125,7 @@ services:
       primary-db-seed:
         condition: service_completed_successfully
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health >/dev/null || exit 1']
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health/ready >/dev/null || exit 1']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -131,6 +137,7 @@ services:
       dockerfile: auth-provider/sync-worker/Dockerfile
     ports:
       - '${SYNC_WORKER_PORT}:3004'
+    stop_grace_period: 15s
     environment:
       PORT: 3004
       DATABASE_URL: postgresql://${PRIMARY_DB_USER}:${PRIMARY_DB_PASSWORD}@primary-db:5432/${PRIMARY_DB_NAME}
@@ -140,6 +147,7 @@ services:
       DELIVERY_RETRY_MAX_ATTEMPTS: ${DELIVERY_RETRY_MAX_ATTEMPTS:-5}
       DELIVERY_RETRY_BASE_MS: ${DELIVERY_RETRY_BASE_MS:-1000}
       DELIVERY_RETRY_MAX_MS: ${DELIVERY_RETRY_MAX_MS:-60000}
+      SHUTDOWN_TIMEOUT_MS: ${SHUTDOWN_TIMEOUT_MS:-10000}
     depends_on:
       rabbitmq:
         condition: service_healthy

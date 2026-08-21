@@ -60,6 +60,19 @@ describe('FrontChannelLoginService', () => {
     expect(service.getAdminDashboardUrl()).toBe('http://localhost:3000/admin');
   });
 
+  it('builds a fixed MFA page URL without putting login state in the query', () => {
+    const mfaPageUrl = new URL(service.buildMfaLoginPageUrl());
+    const failedMfaPageUrl = new URL(
+      service.buildMfaLoginPageUrl('invalid_or_expired_code'),
+    );
+
+    expect(mfaPageUrl.toString()).toBe('http://localhost:3000/login/mfa');
+    expect(failedMfaPageUrl.searchParams.get('error')).toBe(
+      'invalid_or_expired_code',
+    );
+    expect(failedMfaPageUrl.searchParams.has('return_to')).toBe(false);
+  });
+
   it('accepts only the exact public Auth Provider UI origin', () => {
     expect(service.isPublicUiOrigin('http://localhost:3000')).toBe(true);
 

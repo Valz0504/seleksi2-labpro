@@ -36,6 +36,28 @@ describe('AppController (e2e)', () => {
       });
   });
 
+  it('GET /metrics exposes aggregate Prometheus metrics', () => {
+    return request(app.getHttpServer())
+      .get('/metrics')
+      .expect(200)
+      .expect('Cache-Control', 'no-store')
+      .expect(
+        ({
+          headers,
+          text,
+        }: {
+          headers: Record<string, string>;
+          text: string;
+        }) => {
+          expect(headers['content-type']).toContain('text/plain');
+          expect(text).toContain('sync_worker_http_requests_total');
+          expect(text).toContain('sync_worker_dependency_up');
+          expect(text).not.toContain('postgresql://');
+          expect(text).not.toContain('INTERNAL_SERVICE_SECRET');
+        },
+      );
+  });
+
   afterAll(async () => {
     await app.close();
   });

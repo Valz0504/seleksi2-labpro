@@ -64,7 +64,7 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
               Daftar pengguna
             </h2>
             <p className="mt-3 max-w-2xl leading-7 text-slate-600">
-              Lihat identitas, role, status akun, dan group yang menentukan akses setiap pengguna.
+              Lihat identitas, status akun, dan group yang menentukan akses setiap pengguna.
             </p>
           </div>
           <Link
@@ -117,9 +117,6 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
                     Pengguna
                   </th>
                   <th className="px-5 py-3 font-bold" scope="col">
-                    Role
-                  </th>
-                  <th className="px-5 py-3 font-bold" scope="col">
                     Status
                   </th>
                   <th className="px-5 py-3 font-bold" scope="col">
@@ -139,9 +136,6 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
                     <td className="px-5 py-4">
                       <p className="font-bold text-slate-900">{user.name}</p>
                       <p className="mt-1 text-slate-500">{user.email}</p>
-                    </td>
-                    <td className="px-5 py-4 font-semibold text-slate-700">
-                      {user.role === 'ADMIN' ? 'Admin' : 'User'}
                     </td>
                     <td className="px-5 py-4">
                       <StatusBadge status={user.status} />

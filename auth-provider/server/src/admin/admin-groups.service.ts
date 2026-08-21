@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { CONTROL_PANEL_ADMIN_GROUP_NAME } from '../auth/control-panel-access.constants';
 import { PrismaService } from '../database/prisma.service';
 import type { AdminActor } from './admin-request';
 import { AdminRevocationService } from './admin-revocation.service';
@@ -130,6 +131,15 @@ export class AdminGroupsService {
     if (name === '') {
       throw this.invalidRequest('Nama group tidak boleh kosong');
     }
+    if (
+      currentGroup.name === CONTROL_PANEL_ADMIN_GROUP_NAME &&
+      name !== undefined &&
+      name !== currentGroup.name
+    ) {
+      throw this.systemGroupProtected(
+        'Nama group administrator Control Panel tidak dapat diubah',
+      );
+    }
     if (name === undefined && description === undefined) {
       throw this.invalidRequest('Tidak ada data group yang diperbarui');
     }
@@ -179,6 +189,11 @@ export class AdminGroupsService {
 
     if (!group) {
       throw this.groupNotFound();
+    }
+    if (group.name === CONTROL_PANEL_ADMIN_GROUP_NAME) {
+      throw this.systemGroupProtected(
+        'Group administrator Control Panel tidak dapat dihapus',
+      );
     }
 
     const userIds = group.userGroups.map(({ userId }) => userId);
@@ -255,6 +270,12 @@ export class AdminGroupsService {
   private invalidRequest(message: string): BadRequestException {
     return new BadRequestException({
       error: { code: 'INVALID_ADMIN_REQUEST', message },
+    });
+  }
+
+  private systemGroupProtected(message: string): BadRequestException {
+    return new BadRequestException({
+      error: { code: 'SYSTEM_GROUP_PROTECTED', message },
     });
   }
 }

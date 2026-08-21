@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { RevocationEvent } from '@seleksi/shared';
 import * as amqp from 'amqplib';
@@ -37,8 +37,18 @@ export class RabbitMqPublishError extends Error {
   }
 }
 
+export interface RabbitMqQueueMetrics {
+  main: {
+    messagesReady: number;
+    consumers: number;
+  };
+  deadLetter: {
+    messagesReady: number;
+  };
+}
+
 @Injectable()
-export class RabbitMqPublisherService implements OnModuleDestroy {
+export class RabbitMqPublisherService {
   private readonly logger = new Logger(RabbitMqPublisherService.name);
   private readonly confirmTimeoutMs: number;
   private connection?: ChannelModel;
@@ -63,7 +73,41 @@ export class RabbitMqPublisherService implements OnModuleDestroy {
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
+  async checkReadiness(): Promise<void> {
+    try {
+      const channel = await this.getChannel();
+
+      await channel.checkQueue(REVOCATION_MESSAGING.queue);
+    } catch (error) {
+      await this.resetConnection();
+      throw new RabbitMqPublishError(error);
+    }
+  }
+
+  async getQueueMetrics(): Promise<RabbitMqQueueMetrics> {
+    try {
+      const channel = await this.getChannel();
+      const [main, deadLetter] = await Promise.all([
+        channel.checkQueue(REVOCATION_MESSAGING.queue),
+        channel.checkQueue(REVOCATION_MESSAGING.deadLetterQueue),
+      ]);
+
+      return {
+        main: {
+          messagesReady: main.messageCount,
+          consumers: main.consumerCount,
+        },
+        deadLetter: {
+          messagesReady: deadLetter.messageCount,
+        },
+      };
+    } catch (error) {
+      await this.resetConnection();
+      throw new RabbitMqPublishError(error);
+    }
+  }
+
+  async close(): Promise<void> {
     this.destroyed = true;
 
     if (this.connecting) {

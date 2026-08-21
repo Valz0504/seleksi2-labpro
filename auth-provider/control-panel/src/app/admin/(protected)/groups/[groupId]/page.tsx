@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getAdminGroup, getCurrentAdminSession } from '@/lib/admin-session';
+import { CONTROL_PANEL_ADMIN_GROUP_NAME } from '@/lib/control-panel-access';
 import { DeleteGroupForm } from './delete-group-form';
 import { UpdateGroupForm } from './update-group-form';
 
@@ -51,6 +52,7 @@ export default async function AdminGroupDetailPage({
 
   const { group } = result;
   const wasUpdated = query.updated === '1';
+  const isControlPanelAdminGroup = group.name === CONTROL_PANEL_ADMIN_GROUP_NAME;
   const includesCurrentAdmin = group.userGroups.some(
     ({ user }) => user.id === currentSession?.user.id,
   );
@@ -79,15 +81,29 @@ export default async function AdminGroupDetailPage({
       ) : null}
 
       <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(18rem,1fr)]">
-        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-          <h3 className="text-xl font-bold text-slate-950">Edit group</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            Nama harus unik. Perubahan group dicatat pada audit log.
-          </p>
-          <div className="mt-6">
-            <UpdateGroupForm groupId={group.id} name={group.name} description={group.description} />
-          </div>
-        </section>
+        {isControlPanelAdminGroup ? (
+          <section className="rounded-xl border border-blue-200 bg-blue-50 p-6 sm:p-8">
+            <h3 className="text-xl font-bold text-blue-950">Group sistem</h3>
+            <p className="mt-2 text-sm leading-6 text-blue-900">
+              Membership group ini menentukan siapa yang boleh mengakses Control Panel. Nama dan
+              group-nya dilindungi agar akses administrator tidak rusak.
+            </p>
+          </section>
+        ) : (
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+            <h3 className="text-xl font-bold text-slate-950">Edit group</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              Nama harus unik. Perubahan group dicatat pada audit log.
+            </p>
+            <div className="mt-6">
+              <UpdateGroupForm
+                groupId={group.id}
+                name={group.name}
+                description={group.description}
+              />
+            </div>
+          </section>
+        )}
 
         <aside className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="font-bold text-slate-950">Informasi group</h3>
@@ -222,21 +238,23 @@ export default async function AdminGroupDetailPage({
         </section>
       </div>
 
-      <section className="mt-8 rounded-xl border border-red-200 bg-red-50 p-6 sm:p-8">
-        <p className="text-sm font-semibold text-red-700">Zona berbahaya</p>
-        <h3 className="mt-1 text-2xl font-bold tracking-tight text-red-950">Hapus group</h3>
-        <p className="mt-2 max-w-3xl leading-7 text-red-900">
-          Penghapusan bersifat permanen dan ikut menghapus seluruh keanggotaan serta policy milik
-          group ini. Group harus dibuat dan dikonfigurasi ulang jika masih diperlukan.
-        </p>
-        <DeleteGroupForm
-          groupId={group.id}
-          groupName={group.name}
-          memberCount={group.userGroups.length}
-          policyCount={group.policies.length}
-          includesCurrentAdmin={includesCurrentAdmin}
-        />
-      </section>
+      {!isControlPanelAdminGroup ? (
+        <section className="mt-8 rounded-xl border border-red-200 bg-red-50 p-6 sm:p-8">
+          <p className="text-sm font-semibold text-red-700">Zona berbahaya</p>
+          <h3 className="mt-1 text-2xl font-bold tracking-tight text-red-950">Hapus group</h3>
+          <p className="mt-2 max-w-3xl leading-7 text-red-900">
+            Penghapusan bersifat permanen dan ikut menghapus seluruh keanggotaan serta policy milik
+            group ini. Group harus dibuat dan dikonfigurasi ulang jika masih diperlukan.
+          </p>
+          <DeleteGroupForm
+            groupId={group.id}
+            groupName={group.name}
+            memberCount={group.userGroups.length}
+            policyCount={group.policies.length}
+            includesCurrentAdmin={includesCurrentAdmin}
+          />
+        </section>
+      ) : null}
     </>
   );
 }

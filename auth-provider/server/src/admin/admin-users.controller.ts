@@ -42,7 +42,8 @@ import { UpdateUserDto } from './dto/update-user.dto';
 @ApiCookieAuth('centralSession')
 @ApiUnauthorizedResponse({ description: 'Central session is invalid.' })
 @ApiForbiddenResponse({
-  description: 'The authenticated user is not an administrator.',
+  description:
+    'The authenticated user is not a member of the Control Panel administrator group.',
 })
 export class AdminUsersController {
   constructor(private readonly usersService: AdminUsersService) {}
@@ -67,7 +68,7 @@ export class AdminUsersController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an active USER account' })
+  @ApiOperation({ summary: 'Create an active user account' })
   @ApiCreatedResponse({
     description: 'User created with an Argon2id password hash.',
   })

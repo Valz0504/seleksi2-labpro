@@ -23,7 +23,7 @@ export default async function ProtectedAdminLayout({ children }: ProtectedAdminL
     redirect('/admin/login?error=session_required');
   }
 
-  if (currentSession.user.role !== 'ADMIN') {
+  if (!currentSession.user.canAccessControlPanel) {
     redirect('/admin/login?error=admin_required');
   }
 
@@ -81,6 +81,18 @@ export default async function ProtectedAdminLayout({ children }: ProtectedAdminL
             href="/admin/applications"
           >
             Application
+          </Link>
+          <Link
+            className="border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-slate-600 transition hover:border-blue-200 hover:text-blue-700"
+            href="/admin/metrics"
+          >
+            Metrics
+          </Link>
+          <Link
+            className="border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-slate-600 transition hover:border-blue-200 hover:text-blue-700"
+            href="/security/mfa"
+          >
+            MFA Saya
           </Link>
         </nav>
       </header>

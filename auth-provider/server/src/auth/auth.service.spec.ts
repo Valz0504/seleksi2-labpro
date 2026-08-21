@@ -4,7 +4,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { hashPassword } from '../common/security/password';
 import { PrismaService } from '../database/prisma.service';
 import { OutboxEventService } from '../event-processing/outbox-event.service';
+import { MfaChallengeService } from '../mfa/mfa-challenge.service';
 import { AuthService } from './auth.service';
+import { CentralSessionService } from './central-session.service';
+import { ControlPanelAccessService } from './control-panel-access.service';
 
 describe('AuthService', () => {
   const prisma = {
@@ -36,6 +39,13 @@ describe('AuthService', () => {
       throw new Error(`Unexpected config key: ${name}`);
     }),
   };
+  const mfaChallengeService = {
+    start: jest.fn(),
+    complete: jest.fn(),
+  };
+  const controlPanelAccessService = {
+    canAccess: jest.fn(),
+  };
   let authService: AuthService;
 
   beforeEach(async () => {
@@ -44,6 +54,7 @@ describe('AuthService', () => {
     prisma.accessToken.updateMany.mockResolvedValue({ count: 1 });
     prisma.auditLog.create.mockResolvedValue({});
     prisma.outboxEvent.createMany.mockResolvedValue({ count: 1 });
+    controlPanelAccessService.canAccess.mockResolvedValue(false);
     prisma.$transaction.mockImplementation(
       (callback: (transaction: typeof prisma) => Promise<unknown>) =>
         callback(prisma),
@@ -52,9 +63,15 @@ describe('AuthService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
+        CentralSessionService,
         OutboxEventService,
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: configService },
+        { provide: MfaChallengeService, useValue: mfaChallengeService },
+        {
+          provide: ControlPanelAccessService,
+          useValue: controlPanelAccessService,
+        },
       ],
     }).compile();
 
@@ -71,7 +88,6 @@ describe('AuthService', () => {
       email: 'active@example.com',
       passwordHash,
       status: 'ACTIVE',
-      role: 'USER',
     });
     prisma.ssoSession.create.mockImplementation(
       ({ data }: { data: { expiresAt: Date } }) =>
@@ -93,6 +109,11 @@ describe('AuthService', () => {
     >;
     const createInput = createCalls[0]?.[0];
 
+    expect(result.status).toBe('authenticated');
+    if (result.status !== 'authenticated') {
+      throw new Error('Expected an authenticated login result');
+    }
+
     expect(result.sessionToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(createInput?.data.sessionTokenHash).toMatch(/^[a-f0-9]{64}$/);
     expect(createInput?.data.sessionTokenHash).not.toBe(result.sessionToken);
@@ -111,6 +132,52 @@ describe('AuthService', () => {
       },
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates only a short-lived challenge when the account has active MFA', async () => {
+    const passwordHash = await hashPassword('correct-password');
+    const expiresAt = new Date(Date.now() + 300_000);
+
+    prisma.user.findUnique.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      name: 'MFA User',
+      email: 'mfa@example.com',
+      passwordHash,
+      status: 'ACTIVE',
+      mfaTotp: { enabledAt: new Date() },
+    });
+    mfaChallengeService.start.mockResolvedValue({
+      challengeToken: 'pending-token',
+      expiresAt,
+    });
+
+    await expect(
+      authService.login(
+        'mfa@example.com',
+        'correct-password',
+        {},
+        {
+          intent: { type: 'OAUTH', returnTo: '/authorize?client_id=app-a' },
+        },
+      ),
+    ).resolves.toEqual({
+      status: 'mfa_required',
+      challengeToken: 'pending-token',
+      expiresAt,
+    });
+    expect(mfaChallengeService.start).toHaveBeenCalledWith(
+      '11111111-1111-4111-8111-111111111111',
+      'OAUTH',
+      '/authorize?client_id=app-a',
+    );
+    expect(prisma.ssoSession.create).not.toHaveBeenCalled();
+    const auditEventTypes = (
+      prisma.auditLog.create.mock.calls as unknown as Array<
+        [{ data: { eventType: string } }]
+      >
+    ).map(([input]) => input.data.eventType);
+
+    expect(auditEventTypes).not.toContain('LoginSucceeded');
   });
 
   it('returns a generic error and safely audits a failed login', async () => {
@@ -141,7 +208,7 @@ describe('AuthService', () => {
     );
   });
 
-  it('does not create an admin session for a valid non-admin account', async () => {
+  it('does not create an admin session without Control Panel group access', async () => {
     const passwordHash = await hashPassword('correct-password');
 
     prisma.user.findUnique.mockResolvedValue({
@@ -150,7 +217,6 @@ describe('AuthService', () => {
       email: 'user@example.com',
       passwordHash,
       status: 'ACTIVE',
-      role: 'USER',
     });
 
     await expect(
@@ -159,7 +225,7 @@ describe('AuthService', () => {
         'correct-password',
         {},
         {
-          requiredRole: 'ADMIN',
+          requireControlPanelAccess: true,
         },
       ),
     ).rejects.toBeInstanceOf(UnauthorizedException);
@@ -187,7 +253,6 @@ describe('AuthService', () => {
         id: '11111111-1111-4111-8111-111111111111',
         name: 'Active User',
         email: 'active@example.com',
-        role: 'USER',
         status: 'ACTIVE',
       },
     });

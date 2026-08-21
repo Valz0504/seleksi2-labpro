@@ -13,5 +13,6 @@ import { RevocationRetryService } from './revocation-retry.service';
     RabbitMqConsumerService,
     RevocationRetryService,
   ],
+  exports: [RabbitMqConsumerService, RevocationRetryService],
 })
 export class EventProcessingModule {}

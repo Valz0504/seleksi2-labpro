@@ -3,10 +3,38 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { FrontChannelLoginService } from './front-channel-login.service';
 import { SessionCookieService } from './session-cookie.service';
+import { CentralSessionService } from './central-session.service';
+import { MfaChallengeCookieService } from '../mfa/mfa-challenge-cookie.service';
+import { MfaChallengeService } from '../mfa/mfa-challenge.service';
+import { MfaController } from '../mfa/mfa.controller';
+import { MfaEnrollmentService } from '../mfa/mfa-enrollment.service';
+import { MfaSecretCryptoService } from '../mfa/mfa-secret-crypto.service';
+import { MfaRecoveryCodeService } from '../mfa/mfa-recovery-code.service';
+import { MfaManagementService } from '../mfa/mfa-management.service';
+import { TotpService } from '../mfa/totp.service';
+import { ControlPanelAccessService } from './control-panel-access.service';
 
 @Module({
-  controllers: [AuthController],
-  providers: [AuthService, FrontChannelLoginService, SessionCookieService],
-  exports: [AuthService, FrontChannelLoginService, SessionCookieService],
+  controllers: [AuthController, MfaController],
+  providers: [
+    AuthService,
+    CentralSessionService,
+    FrontChannelLoginService,
+    SessionCookieService,
+    MfaChallengeCookieService,
+    MfaChallengeService,
+    MfaEnrollmentService,
+    MfaRecoveryCodeService,
+    MfaManagementService,
+    MfaSecretCryptoService,
+    TotpService,
+    ControlPanelAccessService,
+  ],
+  exports: [
+    AuthService,
+    ControlPanelAccessService,
+    FrontChannelLoginService,
+    SessionCookieService,
+  ],
 })
 export class AuthModule {}
